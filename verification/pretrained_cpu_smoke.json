@@ -27,6 +27,8 @@
     "cue": {
       "backbone_updated": true,
       "diagnostics": {
+        "amp_overflow_retries": 0,
+        "amp_scale": 1.0,
         "disagreement": 0.027038106694817543,
         "gate_max": 0.551958441734314,
         "gate_min": 0.5307328104972839,
@@ -41,6 +43,8 @@
     "erm": {
       "backbone_updated": true,
       "diagnostics": {
+        "amp_overflow_retries": 0,
+        "amp_scale": 1.0,
         "loss": 1.9238101243972778,
         "unmasked_train_accuracy": 0.3333333432674408
       },
@@ -49,6 +53,8 @@
     "rsc": {
       "backbone_updated": true,
       "diagnostics": {
+        "amp_overflow_retries": 0,
+        "amp_scale": 1.0,
         "loss": 2.4787750244140625,
         "rsc_challenged_samples": 0.3333333432674408,
         "rsc_kept_fraction": 0.888671875,
@@ -59,5 +65,5 @@
     }
   },
   "purpose": "pretrained_224px_synthetic_cpu_verification",
-  "source_sha256": "8012ca8004e2a2f625f2e7d861c8f88cd9099073fbad26c7e6b43ca49df31258"
+  "source_sha256": "583fc84119e4d5ff16b323e91d446f394bd824eb1f400a94ee8bfdadff9ad4e2"
 }

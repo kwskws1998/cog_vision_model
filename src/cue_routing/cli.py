@@ -21,7 +21,15 @@ from .data import (
     prepare_manifest,
     training_loader,
 )
-from .engine import evaluate_target, make_model, optimize_batch, train
+from .engine import (
+    autocast_context,
+    evaluate_target,
+    make_model,
+    optimize_batch,
+    train,
+    validate_device,
+    vram_stats,
+)
 from .io import (
     atomic_json,
     canonical_hash,
@@ -164,24 +172,12 @@ def pretrained_smoke(project_root):
     return result
 
 
-def real_data_smoke(manifest_path, project_root):
-    """Verify real source images, augmentations, optimizer steps, and unmasked inference."""
-    manifest = load_manifest(manifest_path, Path(project_root) / "references" / "pacs_splits")
-    if manifest["kind"] != "pacs":
-        raise ValueError("data-smoke requires the complete real PACS manifest")
-    result = {
-        "purpose": "real_PACS_source_data_cpu_smoke",
-        "benchmark_evidence": False,
-        "cuda_memory_measured": False,
-        "dataset_id": manifest["dataset_id"],
-        "verified_image_count": len(manifest["images"]),
-        "target_loader_accessed": False,
-        "methods": {},
-    }
-    initial_hashes, batch_hashes = [], []
-    for method in METHODS:
+def real_data_smoke(manifest_path, project_root, config=None, steps=1):
+    """Verify pretrained source updates on CPU or the unchanged CUDA benchmark recipe."""
+    if type(steps) is not int or steps < 1:
+        raise ValueError("data-smoke steps must be a positive integer")
+    if config is None:
         config = ExperimentConfig(
-            method=method,
             steps=1,
             eval_every=1,
             batch_per_domain=1,
@@ -193,35 +189,83 @@ def real_data_smoke(manifest_path, project_root):
             pretrained=True,
             debug=True,
         )
-        seed_everything(config.seed)
-        model = make_model(config, project_root).train()
+    validate_device(config)
+    if not config.pretrained or config.image_size != 224:
+        raise ValueError("data-smoke requires pretrained weights and 224px images")
+    manifest = load_manifest(manifest_path, Path(project_root) / "references" / "pacs_splits")
+    if manifest["kind"] != "pacs":
+        raise ValueError("data-smoke requires the complete real PACS manifest")
+    result = {
+        "purpose": f"real_PACS_source_data_{config.device}_smoke",
+        "benchmark_evidence": False,
+        "cuda_memory_measured": config.device == "cuda",
+        "config": config.to_dict(),
+        "optimizer_steps_per_method": steps,
+        "dataset_id": manifest["dataset_id"],
+        "verified_image_count": len(manifest["images"]),
+        "target_loader_accessed": False,
+        "methods": {},
+    }
+    initial_hashes, batch_hashes = [], []
+    for method in METHODS:
+        current = replace(config, method=method)
+        seed_everything(current.seed, current.device)
+        if current.device == "cuda":
+            torch.cuda.empty_cache()
+            torch.cuda.reset_peak_memory_stats()
+        model = make_model(current, project_root).train()
         initial_hashes.append(state_hash(model.state_dict()))
         before = model.encoder[0].weight.detach().clone()
-        images, labels = next(iter(training_loader(manifest, config)))
-        batch_hashes.append(state_hash({"images": images, "labels": labels}))
-        optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
-        scaler = torch.amp.GradScaler("cuda", enabled=False)
-        diagnostics = optimize_batch(model, optimizer, scaler, images, labels, config)
+        optimizer = torch.optim.Adam(
+            model.parameters(), lr=current.learning_rate, weight_decay=current.weight_decay
+        )
+        scaler = torch.amp.GradScaler(
+            "cuda", enabled=current.device == "cuda" and current.precision == "fp16"
+        )
+        method_batches, step_diagnostics = [], []
+        loader = training_loader(manifest, current, 0, steps)
+        for images, labels in loader:
+            method_batches.append(state_hash({"images": images, "labels": labels}))
+            images = images.to(current.device, non_blocking=True)
+            labels = labels.to(current.device, non_blocking=True)
+            step_diagnostics.append(
+                optimize_batch(model, optimizer, scaler, images, labels, current)
+            )
+            vram_stats(current)
+        if len(step_diagnostics) != steps or any(
+            state.get("step") is not None and int(state["step"]) != steps
+            for state in optimizer.state.values()
+        ):
+            raise AssertionError("data-smoke did not complete every scheduled Adam update")
+        batch_hashes.append(canonical_hash(method_batches))
         checked = []
         model.eval()
         for domain in DOMAINS:
-            if domain != config.target:
-                batch, _ = next(iter(evaluation_loader(manifest, domain, "crossval", config)))
-                with torch.no_grad():
-                    output = model(batch)
+            if domain != current.target:
+                batch, _ = next(iter(evaluation_loader(manifest, domain, "crossval", current)))
+                with torch.no_grad(), autocast_context(current):
+                    output = model(batch.to(current.device, non_blocking=True))
                 if output.shape != (len(batch), 7) or not torch.isfinite(output).all():
                     raise AssertionError("Invalid real-source validation predictions")
                 checked.append(domain)
+                vram_stats(current)
         updated = not torch.equal(before, model.encoder[0].weight)
         if not updated:
             raise AssertionError("Real-source optimizer step did not update the backbone")
         result["methods"][method] = {
-            "diagnostics": diagnostics,
+            "diagnostics": step_diagnostics[-1],
+            "step_diagnostics": step_diagnostics,
+            "amp_overflow_retries_total": sum(
+                item["amp_overflow_retries"] for item in step_diagnostics
+            ),
+            "optimizer_steps": steps,
             "backbone_updated": updated,
             "source_validation_domains_checked": checked,
             "training_batch": len(images),
             "image_size": 224,
+            "vram": vram_stats(current),
         }
+        del model, optimizer, scaler, before, images, labels, batch, output, loader
     result["matched_initial_weights"] = len(set(initial_hashes)) == 1
     result["matched_training_images_and_augmentations"] = len(set(batch_hashes)) == 1
     if (
@@ -231,7 +275,9 @@ def real_data_smoke(manifest_path, project_root):
         raise AssertionError("Real-source comparison is not matched")
     result["environment"] = environment()
     result["source_sha256"] = source_hash(project_root)
-    atomic_json(Path(project_root) / "verification" / "real_data_cpu_smoke.json", result)
+    atomic_json(
+        Path(project_root) / "verification" / f"real_data_{config.device}_smoke.json", result
+    )
     return result
 
 
@@ -489,6 +535,11 @@ def main(project_root):
     prepare.add_argument("--download", action="store_true")
     data_smoke = commands.add_parser("data-smoke")
     data_smoke.add_argument("--manifest", type=Path, default=root / "data" / "pacs_manifest.json")
+    data_smoke.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
+    data_smoke.add_argument("--target", choices=DOMAINS)
+    data_smoke.add_argument("--seed", type=int)
+    data_smoke.add_argument("--steps", type=int)
+    data_smoke.add_argument("--config", type=Path, default=root / "configs" / "pacs_resnet18.json")
     for command in ("train", "matrix", "profile"):
         sub = commands.add_parser(command)
         sub.add_argument("--config", type=Path, default=root / "configs" / "pacs_resnet18.json")
@@ -525,7 +576,23 @@ def main(project_root):
     elif args.command == "pretrained-smoke":
         result = pretrained_smoke(root)
     elif args.command == "data-smoke":
-        result = real_data_smoke(args.manifest, root)
+        config = load_config(args)
+        if args.device == "cpu":
+            config = replace(
+                config,
+                device="cpu",
+                precision="fp32",
+                batch_per_domain=1,
+                eval_batch_size=3,
+                steps=1,
+                eval_every=1,
+                workers=0,
+                debug=True,
+            ).validate()
+        elif config.device != "cuda":
+            parser.error("data-smoke --device cuda requires device=cuda in its config")
+        steps = args.steps if args.steps is not None else (10 if args.device == "cuda" else 1)
+        result = real_data_smoke(args.manifest, root, config, steps)
     elif args.command == "prepare":
         if args.download and args.archive:
             parser.error("Choose --download or --archive")

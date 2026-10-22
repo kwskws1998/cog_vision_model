@@ -33,8 +33,8 @@
           "step": 1
         },
         "completed_steps": 2,
-        "contract_hash": "fee44126b120d60af65a669580ebf8ff0d233d09df759777c04f7f819a34bb40",
-        "session_seconds": 0.43593412498012185,
+        "contract_hash": "ba6eaadcc005372b83a54763b35ca0d8861cbee4bda3462b5233654f10ef4bba",
+        "session_seconds": 0.4574004579917528,
         "status": "complete",
         "vram": {
           "measured": false,
@@ -53,8 +53,8 @@
           "step": 1
         },
         "completed_steps": 2,
-        "contract_hash": "38f5383e0336b751fc142e32d5ac7d29a2161278e0cfda35bf45bcd4d8a31948",
-        "session_seconds": 0.5322215000051074,
+        "contract_hash": "34964b1b402bcaf7c5d9c3f32003f4a5544afa56a4044f69b310d2bb9dc7c7b2",
+        "session_seconds": 0.40512866602512076,
         "status": "complete",
         "vram": {
           "measured": false,
@@ -73,8 +73,8 @@
           "step": 1
         },
         "completed_steps": 2,
-        "contract_hash": "82547170578b3e76b0ec5e8edd3b6a23d1665f7e4fdcc1f5bbe3bb360e9ed0f0",
-        "session_seconds": 0.4603175829979591,
+        "contract_hash": "0d259e6272b55a3b3252dc9fbdbe257beccfa47bdd206c9f5cc569acfcceb8b4",
+        "session_seconds": 0.41072058299323544,
         "status": "complete",
         "vram": {
           "measured": false,
@@ -84,5 +84,5 @@
     }
   },
   "purpose": "synthetic_cpu_pipeline_verification",
-  "source_sha256": "8012ca8004e2a2f625f2e7d861c8f88cd9099073fbad26c7e6b43ca49df31258"
+  "source_sha256": "583fc84119e4d5ff16b323e91d446f394bd824eb1f400a94ee8bfdadff9ad4e2"
 }

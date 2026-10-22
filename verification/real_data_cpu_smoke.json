@@ -1,5 +1,34 @@
 {
   "benchmark_evidence": false,
+  "config": {
+    "batch_per_domain": 1,
+    "debug": true,
+    "device": "cpu",
+    "eval_batch_size": 3,
+    "eval_every": 1,
+    "fixed_joint": 0.75,
+    "freeze_bn": true,
+    "gate_tau": 0.15,
+    "gate_temperature": 0.05,
+    "gradient_clip": 0.0,
+    "grid_size": 2,
+    "image_size": 224,
+    "joint_floor": 0.5,
+    "learning_rate": 5e-05,
+    "max_vram_gib": 20.0,
+    "method": "cue",
+    "precision": "fp32",
+    "pretrained": true,
+    "pretrained_path": "",
+    "routing": "cue",
+    "rsc_batch_drop": 0.3333333333333333,
+    "rsc_feature_drop": 0.3333333333333333,
+    "seed": 0,
+    "steps": 1,
+    "target": "sketch",
+    "weight_decay": 0.0,
+    "workers": 0
+  },
   "cuda_memory_measured": false,
   "dataset_id": "7efbd50341b5cc38fe816aa3cd9ffa369dabb9f0e4d8654d1ee8bb0b54180bd6",
   "environment": {
@@ -26,8 +55,11 @@
   "matched_training_images_and_augmentations": true,
   "methods": {
     "cue": {
+      "amp_overflow_retries_total": 0,
       "backbone_updated": true,
       "diagnostics": {
+        "amp_overflow_retries": 0,
+        "amp_scale": 1.0,
         "disagreement": 0.0834251269698143,
         "gate_max": 0.7560245990753174,
         "gate_min": 0.55702805519104,
@@ -38,30 +70,68 @@
         "unmasked_train_accuracy": 0.0
       },
       "image_size": 224,
+      "optimizer_steps": 1,
       "source_validation_domains_checked": [
         "art_painting",
         "cartoon",
         "photo"
       ],
-      "training_batch": 3
+      "step_diagnostics": [
+        {
+          "amp_overflow_retries": 0,
+          "amp_scale": 1.0,
+          "disagreement": 0.0834251269698143,
+          "gate_max": 0.7560245990753174,
+          "gate_min": 0.55702805519104,
+          "joint_ce": 1.8173936605453491,
+          "joint_fraction": 0.6121911406517029,
+          "loss": 1.8435431718826294,
+          "marginal_ce": 1.865047812461853,
+          "unmasked_train_accuracy": 0.0
+        }
+      ],
+      "training_batch": 3,
+      "vram": {
+        "measured": false,
+        "reason": "cpu_execution"
+      }
     },
     "erm": {
+      "amp_overflow_retries_total": 0,
       "backbone_updated": true,
       "diagnostics": {
+        "amp_overflow_retries": 0,
+        "amp_scale": 1.0,
         "loss": 1.8173937797546387,
         "unmasked_train_accuracy": 0.0
       },
       "image_size": 224,
+      "optimizer_steps": 1,
       "source_validation_domains_checked": [
         "art_painting",
         "cartoon",
         "photo"
       ],
-      "training_batch": 3
+      "step_diagnostics": [
+        {
+          "amp_overflow_retries": 0,
+          "amp_scale": 1.0,
+          "loss": 1.8173937797546387,
+          "unmasked_train_accuracy": 0.0
+        }
+      ],
+      "training_batch": 3,
+      "vram": {
+        "measured": false,
+        "reason": "cpu_execution"
+      }
     },
     "rsc": {
+      "amp_overflow_retries_total": 0,
       "backbone_updated": true,
       "diagnostics": {
+        "amp_overflow_retries": 0,
+        "amp_scale": 1.0,
         "loss": 3.416362762451172,
         "rsc_challenged_samples": 0.3333333432674408,
         "rsc_kept_fraction": 0.888671875,
@@ -69,16 +139,33 @@
         "unmasked_train_accuracy": 0.0
       },
       "image_size": 224,
+      "optimizer_steps": 1,
       "source_validation_domains_checked": [
         "art_painting",
         "cartoon",
         "photo"
       ],
-      "training_batch": 3
+      "step_diagnostics": [
+        {
+          "amp_overflow_retries": 0,
+          "amp_scale": 1.0,
+          "loss": 3.416362762451172,
+          "rsc_challenged_samples": 0.3333333432674408,
+          "rsc_kept_fraction": 0.888671875,
+          "rsc_probability_drop": 0.1646878570318222,
+          "unmasked_train_accuracy": 0.0
+        }
+      ],
+      "training_batch": 3,
+      "vram": {
+        "measured": false,
+        "reason": "cpu_execution"
+      }
     }
   },
+  "optimizer_steps_per_method": 1,
   "purpose": "real_PACS_source_data_cpu_smoke",
-  "source_sha256": "8012ca8004e2a2f625f2e7d861c8f88cd9099073fbad26c7e6b43ca49df31258",
+  "source_sha256": "583fc84119e4d5ff16b323e91d446f394bd824eb1f400a94ee8bfdadff9ad4e2",
   "target_loader_accessed": false,
   "verified_image_count": 9991
 }

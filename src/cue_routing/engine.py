@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import math
 import time
 from pathlib import Path
 
@@ -96,27 +97,70 @@ def training_objective(model, images, targets, config):
 
 
 def optimize_batch(model, optimizer, scaler, images, targets, config):
-    """Perform one finite checked step, including Adam state allocation and AMP unscale."""
-    optimizer.zero_grad(set_to_none=True)
-    loss, diagnostics = training_objective(model, images, targets, config)
-    if not torch.isfinite(loss):
-        raise FloatingPointError("Nonfinite training loss")
-    scaler.scale(loss).backward()
-    scaler.unscale_(optimizer)
-    if any(
-        parameter.grad is not None and not torch.isfinite(parameter.grad).all()
-        for parameter in model.parameters()
-    ):
-        raise FloatingPointError(
-            "Nonfinite gradients; this run is invalid, not an implicit skipped step"
+    """Complete one update, retrying FP16 overflow on identical inputs and RNG state.
+
+    GradScaler skips each overflowing attempt and reduces its scale. Retrying the
+    same batch preserves the scheduled number of optimizer updates. Model buffers
+    and RNGs are restored before replay, so BatchNorm and stochastic operators see
+    the same state as a single attempt. Sixteen backoffs bound recovery; nonfinite
+    losses and gradients without an enabled scaler remain fatal.
+    """
+    enabled = scaler.is_enabled()
+    rng = capture_rng(config.device) if enabled else None
+    buffers = (
+        {name: value.detach().clone() for name, value in model.named_buffers()} if enabled else {}
+    )
+    for retries in range(17):
+        if retries:
+            restore_rng(rng)
+            with torch.no_grad():
+                for name, value in model.named_buffers():
+                    value.copy_(buffers[name])
+        optimizer.zero_grad(set_to_none=True)
+        loss, diagnostics = training_objective(model, images, targets, config)
+        if not torch.isfinite(loss):
+            raise FloatingPointError(
+                "Nonfinite training loss; AMP scale cannot repair the forward pass"
+            )
+        scaler.scale(loss).backward()
+        scaler.unscale_(optimizer)
+        nonfinite = any(
+            parameter.grad is not None and not torch.isfinite(parameter.grad).all()
+            for parameter in model.parameters()
         )
-    if config.gradient_clip > 0:
-        torch.nn.utils.clip_grad_norm_(
-            model.parameters(), config.gradient_clip, error_if_nonfinite=True
-        )
-    scaler.step(optimizer)
-    scaler.update()
-    return {"loss": float(loss.detach()), **diagnostics}
+        if nonfinite:
+            if not enabled:
+                raise FloatingPointError("Nonfinite gradients without enabled FP16 loss scaling")
+            previous_scale = scaler.get_scale()
+            if retries < 16:
+                scaler.step(optimizer)
+                scaler.update()
+            current_scale = scaler.get_scale()
+            if (
+                retries == 16
+                or not math.isfinite(current_scale)
+                or not 0 < current_scale < previous_scale
+            ):
+                optimizer.zero_grad(set_to_none=True)
+                raise FloatingPointError(
+                    f"Nonfinite gradients after {retries + 1} AMP attempts "
+                    f"(method={config.method}, scale={current_scale}); no batch update completed"
+                )
+            del loss
+            continue
+        if config.gradient_clip > 0:
+            torch.nn.utils.clip_grad_norm_(
+                model.parameters(), config.gradient_clip, error_if_nonfinite=True
+            )
+        scaler.step(optimizer)
+        scaler.update()
+        return {
+            "loss": float(loss.detach()),
+            **diagnostics,
+            "amp_overflow_retries": retries,
+            "amp_scale": scaler.get_scale(),
+        }
+    raise AssertionError("AMP retry loop did not return or fail")
 
 
 def vram_stats(config):
@@ -322,6 +366,9 @@ def train(config, manifest_path, run_dir, project_root, resume=False, stop_after
                     }
                 record = {
                     "step": step,
+                    "amp_overflow_retries_total": sum(
+                        item["amp_overflow_retries"] for item in interval
+                    ),
                     "training": {
                         key: sum(item[key] for item in interval) / len(interval)
                         for key in diagnostics

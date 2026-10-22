@@ -27,11 +27,11 @@
         "bundle.py"
       ],
       "exit_code": 0,
-      "output": "19 files already formatted\n"
+      "output": "20 files already formatted\n"
     }
   ],
   "passed": true,
-  "source_sha256": "8012ca8004e2a2f625f2e7d861c8f88cd9099073fbad26c7e6b43ca49df31258",
+  "source_sha256": "583fc84119e4d5ff16b323e91d446f394bd824eb1f400a94ee8bfdadff9ad4e2",
   "tool": "ruff",
   "version": "0.14.1"
 }

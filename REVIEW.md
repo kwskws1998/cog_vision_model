@@ -49,9 +49,21 @@ The review preserved the proposed update in METHOD.md. The CNN readout still add
 
 Passing these checks establishes code-path behavior and the tested identities. It does not establish that spatial regions are independent cognitive cues, that the update is novel, that it minimizes a conventional global smooth objective, or that it improves domain generalization. Those claims remain outside the implementation evidence.
 
+## CUDA overflow defect reported after handoff
+
+The supplied RTX 3090 terminal log shows a successful Linux CUDA installation, 46 passing pre-fix tests, preparation of all 9,991 images, and a passing random-weight memory profile. Training then aborts in `optimize_batch` before its first printed validation boundary with `Nonfinite gradients; this run is invalid, not an implicit skipped step`. No optimizer-step index or gradient values were included, so the exact failing batch is not known from this log.
+
+The implementation incorrectly treated every scaled-gradient overflow as a fatal run failure before GradScaler could back off. The repaired path lets GradScaler skip each overflowing attempt and reduce its scale, then retries the same batch. Model buffers and Python/NumPy/PyTorch/device RNGs are restored before replay. A logical training step advances only after a finite update; recovery is bounded to sixteen backoffs. Nonfinite losses, persistent failures, and failures without FP16 scaling remain fatal. No learning rate, precision, batch size, target labels, or routing rule is changed.
+
+`tests/test_amp.py` exercises actual CPU GradScaler overflow through a real FP16 cast. It verifies exact agreement with a safe-scale Adam update, one optimizer update despite retries, identical batches and stochastic draws, one buffer update, checkpointed scaler recovery, bounded unrecoverable failure, and rejection of nonfinite forward losses. Source-preflight tests also check scheduled update counts and target-loader exclusion. These tests cover the recovery operator; this host still cannot replay the reported CUDA failure.
+
+`data-smoke --device cuda --steps 10` now exercises pretrained weights and actual PACS source images at the unmodified benchmark batch and precision, including source-validation predictions. A random-weight memory probe cannot substitute for that test. After updating the source, an old matrix's contract must remain untouched; run the repaired matrix in a fresh directory. The old report's 1.15234375 GiB peak reserved memory is evidence for its original random-weight probe only.
+
+The GradScaler step/update ordering follows the [PyTorch 2.8 AMP examples](https://docs.pytorch.org/docs/2.8/notes/amp_examples.html#typical-mixed-precision-training). Fresh local reports bind this repaired source. No completed CUDA training result or method advantage is asserted.
+
 ## Remaining limits
 
-- **CUDA is unavailable locally.** Actual 24 GB fit, CUDA FP16/BF16 execution, scaler behavior on the target GPU, CUDA resume equivalence, and Linux CUDA installation still require the target machine. Mocked memory-guard tests verify control flow, not physical VRAM use.
+- **CUDA is unavailable locally.** The user's original-source log verifies Linux CUDA installation and a passing random-weight memory probe. Fresh CUDA FP16 recovery, repaired-source memory use, and CUDA resume equivalence still require the target machine. Mocked memory-guard tests verify control flow, not physical VRAM use.
 - **The complete 36-run benchmark has not run.** Real-PACS CPU checks execute small source-only optimizer steps and limited source-validation forwards; they provide no held-out-domain accuracy conclusion.
 - **ViT support is at the readout interface.** A complete pretrained ViT training recipe and comparison are not implemented. Mean patch pooling must be matched across controls; it is not equivalent to retaining a CLS-token head.
 - Native Conda explicit exports are platform specific. Use `environment.yml` plus `bootstrap.py --device cuda` on Linux; do not treat the macOS CPU export as a portable CUDA lock file.

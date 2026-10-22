@@ -50,6 +50,24 @@ conda run --no-capture-output --prefix ./.conda python experiment.py data-smoke
 
 This CPU check uses three real source images at 224px per arm and checks unmasked predictions on source-validation images. It verifies matched initial weights and identical augmented batches. It never opens a target loader and does not measure domain generalization accuracy.
 
+Before CUDA training, also exercise the pretrained model on real PACS source batches using the complete benchmark precision and batch sizes:
+
+```text
+conda run --no-capture-output --prefix ./.conda python experiment.py data-smoke --device cuda --target art_painting --seed 0 --steps 10
+```
+
+This checks the first matrix condition (`art_painting`, seed 0), completes ten actual Adam updates per method at batch 48, checks source-validation predictions at batch 64, and writes `verification/real_data_cuda_smoke.json`. It records FP16 overflow retries and checks that all arms see the same images, augmentations, and initial weights. It does not open a target loader. The random-weight `profile` command measures memory separately and cannot establish pretrained FP16 stability.
+
+FP16 overflow triggers GradScaler backoff and a retry of the same batch, with the original RNG state and model buffers restored. Only a successful optimizer update advances the training step. Recovery is bounded to sixteen backoffs. Nonfinite forward losses, persistent gradient failure, and nonfinite FP32/BF16 gradients remain errors. `amp_overflow_retries` and `amp_scale` are included in training diagnostics.
+
+When updating a checkout that failed with `Nonfinite gradients; this run is invalid, not an implicit skipped step`, preserve its old run directory. Its contract binds the previous source. After applying this fix and passing the CUDA preflight, start a fresh matrix:
+
+```text
+conda run --no-capture-output --prefix ./.conda python experiment.py matrix --runs-dir runs/pacs_resnet18_amp_retry_v1 --seeds 0 1 2 --evaluate
+```
+
+Do not edit existing contracts to force resume across this source change. Repeating the new command resumes only this new matrix.
+
 ImageNet weights download automatically into `.cache/torch`. Offline runs can use the original torchvision `resnet18-f37072fd.pth` by setting `pretrained_path` in a copied JSON config. Its hash is recorded. Random initialization and reduced-size/short runs require `debug=true` and cannot enter the benchmark report.
 
 ## Run the initial sketch comparison

@@ -1,0 +1,132 @@
+{
+  "evidence_origin": "user_provided_terminal_transcript",
+  "independently_reexecuted_here": false,
+  "profile": {
+    "budget_gib": 20.0,
+    "config": {
+      "batch_per_domain": 16,
+      "debug": false,
+      "device": "cuda",
+      "eval_batch_size": 64,
+      "eval_every": 200,
+      "fixed_joint": 0.75,
+      "freeze_bn": true,
+      "gate_tau": 0.15,
+      "gate_temperature": 0.05,
+      "gradient_clip": 0.0,
+      "grid_size": 2,
+      "image_size": 224,
+      "joint_floor": 0.5,
+      "learning_rate": 5e-05,
+      "max_vram_gib": 20.0,
+      "method": "cue",
+      "precision": "fp16",
+      "pretrained": true,
+      "pretrained_path": "",
+      "routing": "cue",
+      "rsc_batch_drop": 0.3333333333333333,
+      "rsc_feature_drop": 0.3333333333333333,
+      "seed": 0,
+      "steps": 5000,
+      "target": "sketch",
+      "weight_decay": 0.0,
+      "workers": 4
+    },
+    "environment": {
+      "cpu_threads": 4,
+      "cublas_workspace_config": ":4096:8",
+      "cuda_available": true,
+      "cuda_runtime": "12.6",
+      "deterministic_algorithms": true,
+      "environment_manager": "conda",
+      "gpu": {
+        "capability": [
+          8,
+          6
+        ],
+        "name": "NVIDIA GeForce RTX 3090",
+        "total_gib": 23.55877685546875
+      },
+      "packages": {
+        "Pillow": "11.3.0",
+        "filelock": "3.19.1",
+        "gdown": "5.2.0",
+        "numpy": "2.0.2",
+        "torch": "2.8.0+cu126",
+        "torchvision": "0.23.0+cu126"
+      },
+      "platform": "Linux-6.8.0-138-generic-x86_64-with-glibc2.39",
+      "python": "3.11.17",
+      "tf32_cudnn": false,
+      "tf32_matmul": false
+    },
+    "free_before_gib": 23.2999267578125,
+    "measured": true,
+    "methods": {
+      "cue": {
+        "input_kind": "synthetic_shape_matched_memory_probe",
+        "measured_steps": 3,
+        "parameter_count": 11180103,
+        "random_weights": true,
+        "status": "passed",
+        "training": {
+          "measured": true,
+          "peak_allocated_gib": 0.7902002334594727,
+          "peak_reserved_gib": 0.935546875
+        },
+        "training_and_validation": {
+          "measured": true,
+          "peak_allocated_gib": 0.7902002334594727,
+          "peak_reserved_gib": 1.15234375
+        },
+        "training_batch": 48,
+        "validation_batch": 64,
+        "warmup_steps": 3
+      },
+      "erm": {
+        "input_kind": "synthetic_shape_matched_memory_probe",
+        "measured_steps": 3,
+        "parameter_count": 11180103,
+        "random_weights": true,
+        "status": "passed",
+        "training": {
+          "measured": true,
+          "peak_allocated_gib": 0.7902002334594727,
+          "peak_reserved_gib": 0.935546875
+        },
+        "training_and_validation": {
+          "measured": true,
+          "peak_allocated_gib": 0.7902002334594727,
+          "peak_reserved_gib": 1.15234375
+        },
+        "training_batch": 48,
+        "validation_batch": 64,
+        "warmup_steps": 3
+      },
+      "rsc": {
+        "input_kind": "synthetic_shape_matched_memory_probe",
+        "measured_steps": 3,
+        "parameter_count": 11180103,
+        "random_weights": true,
+        "status": "passed",
+        "training": {
+          "measured": true,
+          "peak_allocated_gib": 0.7902002334594727,
+          "peak_reserved_gib": 0.935546875
+        },
+        "training_and_validation": {
+          "measured": true,
+          "peak_allocated_gib": 0.7902002334594727,
+          "peak_reserved_gib": 1.15234375
+        },
+        "training_batch": 48,
+        "validation_batch": 64,
+        "warmup_steps": 3
+      }
+    },
+    "passes_budget": true,
+    "source_sha256": "8012ca8004e2a2f625f2e7d861c8f88cd9099073fbad26c7e6b43ca49df31258"
+  },
+  "subsequent_training_status": "aborted_on_nonfinite_gradients_before_first_printed_validation",
+  "transcript_sha256": "9260cd7b51306e15696dc4d847f33bd3279b0d861bb86d78881e7b37edb4c714"
+}
