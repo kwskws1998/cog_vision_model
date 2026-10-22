@@ -1,0 +1,30 @@
+{
+  "benchmark_evidence": false,
+  "cases": {
+    "after_review": {
+      "joint_logits": [
+        [
+          4.0,
+          0.0,
+          0.0
+        ]
+      ],
+      "loss": 4.035976409912109,
+      "maximum_gradient_error": 0.0
+    },
+    "before_review": {
+      "joint_logits": [
+        [
+          4.0,
+          0.0,
+          0.0
+        ]
+      ],
+      "loss": 4.5496416091918945,
+      "maximum_gradient_error": 0.3156648874282837
+    }
+  },
+  "original_bundle_sha256": "dbe50f3bc02775c5600ee45af61a8d0cc39e46794487f6897caedb660663740d",
+  "purpose": "controlled_FP32_surrogate_regression",
+  "source_sha256": "8012ca8004e2a2f625f2e7d861c8f88cd9099073fbad26c7e6b43ca49df31258"
+}

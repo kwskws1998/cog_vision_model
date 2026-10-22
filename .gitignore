@@ -1,0 +1,8 @@
+.conda/
+__pycache__/
+*.pyc
+data/
+runs/
+.cache/
+.ruff_cache/
+*.egg-info/

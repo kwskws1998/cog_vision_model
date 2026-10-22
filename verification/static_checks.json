@@ -1,0 +1,37 @@
+{
+  "checks": [
+    {
+      "command": [
+        "ruff",
+        "check",
+        "src",
+        "tests",
+        "bootstrap.py",
+        "experiment.py",
+        "audit.py",
+        "bundle.py"
+      ],
+      "exit_code": 0,
+      "output": "All checks passed!\n"
+    },
+    {
+      "command": [
+        "ruff",
+        "format",
+        "--check",
+        "src",
+        "tests",
+        "bootstrap.py",
+        "experiment.py",
+        "audit.py",
+        "bundle.py"
+      ],
+      "exit_code": 0,
+      "output": "19 files already formatted\n"
+    }
+  ],
+  "passed": true,
+  "source_sha256": "8012ca8004e2a2f625f2e7d861c8f88cd9099073fbad26c7e6b43ca49df31258",
+  "tool": "ruff",
+  "version": "0.14.1"
+}

@@ -1,0 +1,12 @@
+{
+  "archive_sha256": "0dc9d0176fa27c9b4504e7c2e962aebe6a79ed0c1819b84148786e590f87e102",
+  "dataset_id": "7efbd50341b5cc38fe816aa3cd9ffa369dabb9f0e4d8654d1ee8bb0b54180bd6",
+  "environment_manager": "conda",
+  "full_rgb_decoding_passed": true,
+  "images": 9991,
+  "kind": "real_PACS_package_integrity",
+  "official_split_blob_count": 12,
+  "source_sha256": "8012ca8004e2a2f625f2e7d861c8f88cd9099073fbad26c7e6b43ca49df31258",
+  "source_url": "https://drive.google.com/uc?id=1m4X4fROCCXMO0lRLrr6Zz9Vb3974NWhE",
+  "target_predictions_computed": false
+}

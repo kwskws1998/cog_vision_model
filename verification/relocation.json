@@ -1,0 +1,14 @@
+{
+  "prefix": "/Users/wansookim/Documents/cog_vision_model/.conda",
+  "python": "3.11.17",
+  "torch": "2.8.0",
+  "torchvision": "0.23.0",
+  "cuda_runtime": null,
+  "cuda_available": false,
+  "package": "/Users/wansookim/Documents/cog_vision_model/src/cue_routing/__init__.py",
+  "source": "/Users/wansookim/Documents/Codex/2026-10-22/new-chat-2/outputs/cue_credit_routing",
+  "destination": "/Users/wansookim/Documents/cog_vision_model",
+  "files_verified_before_environment_migration": 10063,
+  "dataset_id": "7efbd50341b5cc38fe816aa3cd9ffa369dabb9f0e4d8654d1ee8bb0b54180bd6",
+  "unit_tests_passed": true
+}

@@ -1,0 +1,84 @@
+{
+  "benchmark_evidence": false,
+  "cuda_memory_measured": false,
+  "dataset_id": "7efbd50341b5cc38fe816aa3cd9ffa369dabb9f0e4d8654d1ee8bb0b54180bd6",
+  "environment": {
+    "cpu_threads": 4,
+    "cublas_workspace_config": ":4096:8",
+    "cuda_available": false,
+    "cuda_runtime": null,
+    "deterministic_algorithms": true,
+    "environment_manager": "conda",
+    "packages": {
+      "Pillow": "11.3.0",
+      "filelock": "3.19.1",
+      "gdown": "5.2.0",
+      "numpy": "2.0.2",
+      "torch": "2.8.0",
+      "torchvision": "0.23.0"
+    },
+    "platform": "macOS-15.5-arm64-arm-64bit",
+    "python": "3.11.17",
+    "tf32_cudnn": false,
+    "tf32_matmul": false
+  },
+  "matched_initial_weights": true,
+  "matched_training_images_and_augmentations": true,
+  "methods": {
+    "cue": {
+      "backbone_updated": true,
+      "diagnostics": {
+        "disagreement": 0.0834251269698143,
+        "gate_max": 0.7560245990753174,
+        "gate_min": 0.55702805519104,
+        "joint_ce": 1.8173936605453491,
+        "joint_fraction": 0.6121911406517029,
+        "loss": 1.8435431718826294,
+        "marginal_ce": 1.865047812461853,
+        "unmasked_train_accuracy": 0.0
+      },
+      "image_size": 224,
+      "source_validation_domains_checked": [
+        "art_painting",
+        "cartoon",
+        "photo"
+      ],
+      "training_batch": 3
+    },
+    "erm": {
+      "backbone_updated": true,
+      "diagnostics": {
+        "loss": 1.8173937797546387,
+        "unmasked_train_accuracy": 0.0
+      },
+      "image_size": 224,
+      "source_validation_domains_checked": [
+        "art_painting",
+        "cartoon",
+        "photo"
+      ],
+      "training_batch": 3
+    },
+    "rsc": {
+      "backbone_updated": true,
+      "diagnostics": {
+        "loss": 3.416362762451172,
+        "rsc_challenged_samples": 0.3333333432674408,
+        "rsc_kept_fraction": 0.888671875,
+        "rsc_probability_drop": 0.1646878570318222,
+        "unmasked_train_accuracy": 0.0
+      },
+      "image_size": 224,
+      "source_validation_domains_checked": [
+        "art_painting",
+        "cartoon",
+        "photo"
+      ],
+      "training_batch": 3
+    }
+  },
+  "purpose": "real_PACS_source_data_cpu_smoke",
+  "source_sha256": "8012ca8004e2a2f625f2e7d861c8f88cd9099073fbad26c7e6b43ca49df31258",
+  "target_loader_accessed": false,
+  "verified_image_count": 9991
+}

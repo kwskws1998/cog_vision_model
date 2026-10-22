@@ -1,0 +1,50 @@
+{
+  "conda_setup_verified": true,
+  "cuda_fit_verified": false,
+  "functions": 142,
+  "line_comments": [],
+  "official_image_count": 9991,
+  "official_split_files": 12,
+  "passed": true,
+  "python_files": 19,
+  "source_sha256": "8012ca8004e2a2f625f2e7d861c8f88cd9099073fbad26c7e6b43ca49df31258",
+  "syntax_valid": true,
+  "verification": {
+    "cpu_smoke": {
+      "exists": true,
+      "matches_current_source": true,
+      "outcome_valid": true,
+      "sha256": "e2873b48bb7bc3dcefde54e7c0a3b103181183d906d479817462b4d6eb078af8"
+    },
+    "dataset_preparation": {
+      "exists": true,
+      "matches_current_source": true,
+      "outcome_valid": true,
+      "sha256": "cbc979abca76bd59bb7123a7fe588a9361bcb063cc9068b1b6f191ca572bc741"
+    },
+    "pretrained_cpu_smoke": {
+      "exists": true,
+      "matches_current_source": true,
+      "outcome_valid": true,
+      "sha256": "7dec798d84343e31d449688c7aabb258ab0ffedb1e7ebc18ed593ce0301323f3"
+    },
+    "real_data_cpu_smoke": {
+      "exists": true,
+      "matches_current_source": true,
+      "outcome_valid": true,
+      "sha256": "524aaa3d8c2262b1e7acd06aa14e938a01f29724b74b6022156ac1dd78c05d57"
+    },
+    "static_checks": {
+      "exists": true,
+      "matches_current_source": true,
+      "outcome_valid": true,
+      "sha256": "7ac0bcb15d7d813a29456fc5f6d161eaea5c091d746aaf8df8d301a05ba569ec"
+    },
+    "unit_tests": {
+      "exists": true,
+      "matches_current_source": true,
+      "outcome_valid": true,
+      "sha256": "b02c28dc2eb78ebfd77a383d3cb99354c0e88a42205124096fcb102fecc39b5a"
+    }
+  }
+}

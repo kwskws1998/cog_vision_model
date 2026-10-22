@@ -1,0 +1,21 @@
+{
+  "rsc_repository": "DeLightCMU/RSC",
+  "rsc_commit": "bf6d280c5d74910f009ea8963c59167252659666",
+  "split_folder": "Domain_Generalization/data/correct_txt_lists",
+  "domainbed_repository": "facebookresearch/DomainBed",
+  "domainbed_commit": "b93c22a1cfc3b2428398272c1a116c8de1f4139e",
+  "split_git_blob_sha1": {
+    "art_painting_train_kfold.txt": "8b5405715dae656fc5d189d601090ce1e910d6b2",
+    "art_painting_crossval_kfold.txt": "486f332216219b863fd16838883071555e0c66bc",
+    "art_painting_test_kfold.txt": "9a5728738ea650c342809314e1ccd19bc5403ff0",
+    "cartoon_train_kfold.txt": "48ceb2f88d400a06ba8d8c1abbb84830f9da96b4",
+    "cartoon_crossval_kfold.txt": "e8374913b029b137c1fb48387d3c99eaa58cc93c",
+    "cartoon_test_kfold.txt": "5daf9281e7c019db5336bbeb69bfcea021bcd36d",
+    "photo_train_kfold.txt": "5edd1d10a7dba94cf08b0592adcf3dcf3eb1d5a2",
+    "photo_crossval_kfold.txt": "e001ac79ef517a41a979af9f05337d0cef550aec",
+    "photo_test_kfold.txt": "643ed4aa89e955f4a58b981115591ec8fb80de49",
+    "sketch_train_kfold.txt": "a5088dca0ab5dd1457c8d008851be59e82c73cd1",
+    "sketch_crossval_kfold.txt": "63c0f2050bd43a805cb0e7ecb1172c7860336354",
+    "sketch_test_kfold.txt": "c27970b06be384af8a3d5afe7ae28082bf9eef67"
+  }
+}

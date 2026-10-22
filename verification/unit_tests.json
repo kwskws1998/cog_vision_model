@@ -1,0 +1,28 @@
+{
+  "environment": {
+    "cpu_threads": 4,
+    "cublas_workspace_config": ":4096:8",
+    "cuda_available": false,
+    "cuda_runtime": null,
+    "deterministic_algorithms": true,
+    "environment_manager": "conda",
+    "packages": {
+      "Pillow": "11.3.0",
+      "filelock": "3.19.1",
+      "gdown": "5.2.0",
+      "numpy": "2.0.2",
+      "torch": "2.8.0",
+      "torchvision": "0.23.0"
+    },
+    "platform": "macOS-15.5-arm64-arm-64bit",
+    "python": "3.11.17",
+    "tf32_cudnn": false,
+    "tf32_matmul": false
+  },
+  "errors": 0,
+  "failures": 0,
+  "passed": true,
+  "skipped": 0,
+  "source_sha256": "8012ca8004e2a2f625f2e7d861c8f88cd9099073fbad26c7e6b43ca49df31258",
+  "tests_run": 46
+}

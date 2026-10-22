@@ -1,0 +1,63 @@
+{
+  "benchmark_evidence": false,
+  "cuda_memory_measured": false,
+  "environment": {
+    "cpu_threads": 4,
+    "cublas_workspace_config": ":4096:8",
+    "cuda_available": false,
+    "cuda_runtime": null,
+    "deterministic_algorithms": true,
+    "environment_manager": "conda",
+    "packages": {
+      "Pillow": "11.3.0",
+      "filelock": "3.19.1",
+      "gdown": "5.2.0",
+      "numpy": "2.0.2",
+      "torch": "2.8.0",
+      "torchvision": "0.23.0"
+    },
+    "platform": "macOS-15.5-arm64-arm-64bit",
+    "python": "3.11.17",
+    "tf32_cudnn": false,
+    "tf32_matmul": false
+  },
+  "initial_model_sha256": "585c5a265d71fa277c62ba79587ca231cbbefe1d25ddb59ae0a098d5ebcd73c0",
+  "matched_initial_weights": true,
+  "methods": {
+    "cue": {
+      "backbone_updated": true,
+      "diagnostics": {
+        "disagreement": 0.027038106694817543,
+        "gate_max": 0.551958441734314,
+        "gate_min": 0.5307328104972839,
+        "joint_ce": 1.923810362815857,
+        "joint_fraction": 0.5398595929145813,
+        "loss": 1.926474928855896,
+        "marginal_ce": 1.9294042587280273,
+        "unmasked_train_accuracy": 0.3333333432674408
+      },
+      "parameter_count": 11180103
+    },
+    "erm": {
+      "backbone_updated": true,
+      "diagnostics": {
+        "loss": 1.9238101243972778,
+        "unmasked_train_accuracy": 0.3333333432674408
+      },
+      "parameter_count": 11180103
+    },
+    "rsc": {
+      "backbone_updated": true,
+      "diagnostics": {
+        "loss": 2.4787750244140625,
+        "rsc_challenged_samples": 0.3333333432674408,
+        "rsc_kept_fraction": 0.888671875,
+        "rsc_probability_drop": 0.13284166157245636,
+        "unmasked_train_accuracy": 0.3333333432674408
+      },
+      "parameter_count": 11180103
+    }
+  },
+  "purpose": "pretrained_224px_synthetic_cpu_verification",
+  "source_sha256": "8012ca8004e2a2f625f2e7d861c8f88cd9099073fbad26c7e6b43ca49df31258"
+}

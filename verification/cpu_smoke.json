@@ -1,0 +1,88 @@
+{
+  "benchmark_evidence": false,
+  "environment": {
+    "cpu_threads": 4,
+    "cublas_workspace_config": ":4096:8",
+    "cuda_available": false,
+    "cuda_runtime": null,
+    "deterministic_algorithms": true,
+    "environment_manager": "conda",
+    "packages": {
+      "Pillow": "11.3.0",
+      "filelock": "3.19.1",
+      "gdown": "5.2.0",
+      "numpy": "2.0.2",
+      "torch": "2.8.0",
+      "torchvision": "0.23.0"
+    },
+    "platform": "macOS-15.5-arm64-arm-64bit",
+    "python": "3.11.17",
+    "tf32_cudnn": false,
+    "tf32_matmul": false
+  },
+  "matched_initial_weights": true,
+  "methods": {
+    "cue": {
+      "target_access_events": 1,
+      "target_metric_count": 21,
+      "training": {
+        "benchmark_evidence": false,
+        "best_source_selection": {
+          "macro_accuracy": 0.14285714285714285,
+          "macro_nll": 2.2106056441234165,
+          "step": 1
+        },
+        "completed_steps": 2,
+        "contract_hash": "fee44126b120d60af65a669580ebf8ff0d233d09df759777c04f7f819a34bb40",
+        "session_seconds": 0.43593412498012185,
+        "status": "complete",
+        "vram": {
+          "measured": false,
+          "reason": "cpu_execution"
+        }
+      }
+    },
+    "erm": {
+      "target_access_events": 1,
+      "target_metric_count": 21,
+      "training": {
+        "benchmark_evidence": false,
+        "best_source_selection": {
+          "macro_accuracy": 0.14285714285714285,
+          "macro_nll": 2.212459790141896,
+          "step": 1
+        },
+        "completed_steps": 2,
+        "contract_hash": "38f5383e0336b751fc142e32d5ac7d29a2161278e0cfda35bf45bcd4d8a31948",
+        "session_seconds": 0.5322215000051074,
+        "status": "complete",
+        "vram": {
+          "measured": false,
+          "reason": "cpu_execution"
+        }
+      }
+    },
+    "rsc": {
+      "target_access_events": 1,
+      "target_metric_count": 21,
+      "training": {
+        "benchmark_evidence": false,
+        "best_source_selection": {
+          "macro_accuracy": 0.14285714285714285,
+          "macro_nll": 2.154809299825649,
+          "step": 1
+        },
+        "completed_steps": 2,
+        "contract_hash": "82547170578b3e76b0ec5e8edd3b6a23d1665f7e4fdcc1f5bbe3bb360e9ed0f0",
+        "session_seconds": 0.4603175829979591,
+        "status": "complete",
+        "vram": {
+          "measured": false,
+          "reason": "cpu_execution"
+        }
+      }
+    }
+  },
+  "purpose": "synthetic_cpu_pipeline_verification",
+  "source_sha256": "8012ca8004e2a2f625f2e7d861c8f88cd9099073fbad26c7e6b43ca49df31258"
+}

@@ -1,0 +1,14 @@
+{
+  "prefix": "/Users/wansookim/Documents/cog_vision_model/.conda",
+  "python": "3.11.17",
+  "torch": "2.8.0",
+  "torchvision": "0.23.0",
+  "cuda_runtime": null,
+  "cuda_available": false,
+  "environment_manager": "conda",
+  "requested_device": "cpu",
+  "wheel_index": "https://download.pytorch.org/whl/cpu",
+  "environment_yml_sha256": "1f616acc25b79524ea19beac0b25e185f5341dd4cb2c2dee2cc9c765f41b44ea",
+  "bootstrap_sha256": "b719b2e5bbdbd588b9792d65be26b681d7f498eae27377e8ed4c552f497778e0",
+  "project_metadata_sha256": "0708719a1683cea0f5da3515c2f1889bb58b8f3ad9e4d3a02eeb9ac80af8ebca"
+}
