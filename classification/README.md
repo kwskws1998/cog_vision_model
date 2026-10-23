@@ -4,6 +4,17 @@ This directory implements CIFAR-100, CIFAR-100-C, Tiny ImageNet-200 with explici
 
 The main comparison is ERM, uniform non-target label smoothing, fixed global-to-local self-distillation, Zipf's Label Smoothing dense2, and CUE. These are training interventions on a common small-image ResNet-18. Final inference is global average pooling and the shared final classifier. CUE does not adapt or choose cues during testing.
 
+## One-seed overnight ERM/CUE comparison
+
+Use [OVERNIGHT_CIFAR100.md](OVERNIGHT_CIFAR100.md) for a CIFAR-100-only PreAct
+comparison with 45,000 train / 5,000 validation / 10,000 final test examples.
+`python classification/overnight.py` fixes the common paper-oriented recipe and
+tunes only CUE parameters on validation, using a single seed and measured deadline
+admission. Final tests are sealed until selection closes. The selected checkpoint
+is reused without a second training run. This dedicated preset opts into MSRA
+convolution initialization and author normalization; ordinary study defaults remain
+unchanged. Its held-out split is explicitly not an exact published-score reproduction.
+
 ## Select PostAct or PreAct
 
 Every classification training mode accepts `--activation postact` or `--activation preact`: `erm`, `cue`, `ablation`, and full `train`/`study`. The same choice is supported by plans, CUDA profiles, and smoke verification. Omission preserves `postact`; all shipped presets explicitly retain that default. Set `"activation": "preact"` inside a JSON preset's `training` object to change its default. Dataset overrides may select a different backbone per dataset; an explicit CLI flag overrides both the common setting and all dataset overrides.

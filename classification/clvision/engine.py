@@ -42,6 +42,7 @@ def make_model(config):
         auxiliary=config.method == "zipfls_dense2",
         seed=config.seed,
         activation=config.activation,
+        initialization=config.initialization,
     ).to(config.device)
 
 
@@ -549,7 +550,8 @@ def train(
                 f"[epoch] {config.dataset}/{config.method}/s{config.seed} "
                 f"epoch={epoch}/{config.epochs} step={steps}/{logging.total_steps} "
                 f"train_loss={training['loss']:.4f} train_accuracy={training['train_accuracy']:.4f} "
-                f"eval_loss={validation['nll']:.4f} eval_accuracy={validation['accuracy']:.4f} "
+                f"val_loss={validation['nll']:.4f} val_accuracy={validation['accuracy']:.4f} "
+                f"val_n={validation['n']} "
                 f"lr={rate:.6g} images/s={history[-1]['training_images_per_second']:.1f} "
                 f"peak_allocated={allocated_text} peak_reserved={memory_text} elapsed={duration(elapsed)} "
                 f"run_remaining~={duration(eta)}{routing_text}"

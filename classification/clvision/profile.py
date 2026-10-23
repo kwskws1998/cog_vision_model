@@ -27,6 +27,8 @@ def memory_signature(config):
             "dataset",
             "tiny_imagenet_size",
             "activation",
+            "initialization",
+            "normalization",
             "method",
             "batch_size",
             "eval_batch_size",

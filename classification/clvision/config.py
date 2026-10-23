@@ -43,6 +43,8 @@ class Config:
     dataset: str = "cifar100"
     tiny_imagenet_size: int = 64
     activation: str = "postact"
+    initialization: str = "reference"
+    normalization: str = "dataset"
     method: str = "cue"
     seed: int = 0
     epochs: int = 200
@@ -79,6 +81,12 @@ class Config:
             raise ValueError("tiny_imagenet_size must be 32 or 64")
         if type(self.activation) is not str or self.activation not in ACTIVATIONS:
             raise ValueError("activation must be postact or preact")
+        if self.initialization not in ("reference", "msra"):
+            raise ValueError("initialization must be reference or msra")
+        if self.normalization not in ("dataset", "zipfls"):
+            raise ValueError("normalization must be dataset or zipfls")
+        if self.normalization == "zipfls" and self.dataset != "cifar100":
+            raise ValueError("zipfls normalization is currently defined for CIFAR-100 only")
         for key in (
             "seed",
             "epochs",

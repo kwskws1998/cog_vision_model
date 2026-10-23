@@ -449,7 +449,7 @@ def read_array(root, descriptor):
     return np.load(relative_file(root, descriptor["path"]), mmap_mode="r", allow_pickle=False)
 
 
-def load_manifest(path, verify_bytes=True, root_override=None):
+def load_manifest(path, verify_bytes=True, root_override=None, defer_test=False):
     """Verify manifest identity, paths, and exact image/array bytes before use."""
     value = read_json(path)
     payload = {key: item for key, item in value.items() if key not in ("dataset_id", "root")}
@@ -457,7 +457,13 @@ def load_manifest(path, verify_bytes=True, root_override=None):
         raise ValueError("Dataset manifest identity mismatch")
     root = Path(root_override or value["root"]).resolve()
     value["root"] = str(root)
-    files = list(value.get("arrays", {}).values())
+    if defer_test and value["dataset"] != "cifar100":
+        raise ValueError("Deferred test verification is supported only for CIFAR-100")
+    files = [
+        item
+        for key, item in value.get("arrays", {}).items()
+        if not (defer_test and key.startswith("test_"))
+    ]
     files += list(value.get("corruptions", {}).values())
     if "labels" in value:
         files.append(value["labels"])
@@ -496,7 +502,11 @@ def load_manifest(path, verify_bytes=True, root_override=None):
             test_n = len(value["test_records"])
         else:
             labels = read_array(root, value["arrays"]["train_labels"])
-            test_n = len(read_array(root, value["arrays"]["test_labels"]))
+            test_n = (
+                value["arrays"]["test_labels"]["shape"][0]
+                if defer_test
+                else len(read_array(root, value["arrays"]["test_labels"]))
+            )
         if (
             max(train + validation, default=-1) >= len(labels)
             or max(value["splits"]["test"], default=-1) >= test_n
@@ -541,7 +551,9 @@ def load_manifest(path, verify_bytes=True, root_override=None):
     return value
 
 
-def transform_image(image, dataset, training=False, seed=0, tiny_imagenet_size=64):
+def transform_image(
+    image, dataset, training=False, seed=0, tiny_imagenet_size=64, normalization="dataset"
+):
     """Resize Tiny before keyed augmentation; preserve native CIFAR and Dominoes processing."""
     if type(tiny_imagenet_size) is not int or tiny_imagenet_size not in (32, 64):
         raise ValueError("tiny_imagenet_size must be 32 or 64")
@@ -561,6 +573,10 @@ def transform_image(image, dataset, training=False, seed=0, tiny_imagenet_size=6
             value = value[:, ::-1]
     tensor = torch.from_numpy(value.copy()).permute(2, 0, 1).float().div_(255)
     mean, deviation = NORMALIZATION[dataset]
+    if normalization == "zipfls" and dataset == "cifar100":
+        mean, deviation = (0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)
+    elif normalization != "dataset":
+        raise ValueError("Unknown normalization for dataset")
     return (tensor - tensor.new_tensor(mean)[:, None, None]) / tensor.new_tensor(deviation)[
         :, None, None
     ]
@@ -569,7 +585,16 @@ def transform_image(image, dataset, training=False, seed=0, tiny_imagenet_size=6
 class ImageDataset(Dataset):
     """Expose explicitly requested partitions; training never constructs a final-test dataset."""
 
-    def __init__(self, manifest, split, seed=0, epoch=0, diagnostic="both", tiny_imagenet_size=64):
+    def __init__(
+        self,
+        manifest,
+        split,
+        seed=0,
+        epoch=0,
+        diagnostic="both",
+        tiny_imagenet_size=64,
+        normalization="dataset",
+    ):
         if split not in ("train", "validation", "test"):
             raise ValueError("Unknown partition")
         self.manifest, self.split, self.seed, self.epoch = manifest, split, seed, epoch
@@ -580,13 +605,17 @@ class ImageDataset(Dataset):
         if type(tiny_imagenet_size) is not int or tiny_imagenet_size not in (32, 64):
             raise ValueError("tiny_imagenet_size must be 32 or 64")
         self.tiny_imagenet_size = tiny_imagenet_size
+        self.normalization = normalization
         if diagnostic not in ("both", "vehicle_only", "digit_only") or (
             diagnostic != "both" and split != "test"
         ):
             raise ValueError("Panel deletion is a final-test diagnostic only")
         if "records" not in manifest:
+            source = "test" if split == "test" else "train"
             self.arrays = {
-                key: read_array(self.root, item) for key, item in manifest["arrays"].items()
+                key: read_array(self.root, item)
+                for key, item in manifest["arrays"].items()
+                if key.startswith(source + "_") or key.startswith("digit_" + source + "_")
             }
         if self.dataset == "dominoes":
             source = "test" if split == "test" else "train"
@@ -675,7 +704,12 @@ class ImageDataset(Dataset):
             )
         augment_seed = key_seed("augment", self.seed, self.epoch, self.sample_id(item))
         return transform_image(
-            image, self.dataset, self.split == "train", augment_seed, self.tiny_imagenet_size
+            image,
+            self.dataset,
+            self.split == "train",
+            augment_seed,
+            self.tiny_imagenet_size,
+            self.normalization,
         ), target
 
 
@@ -709,7 +743,13 @@ class EpochBatches(Sampler):
 def make_loader(manifest, config, split, epoch=0, diagnostic="both"):
     """Keep worker RNGs isolated and require an explicit partition at every call."""
     dataset = ImageDataset(
-        manifest, split, config.seed, epoch, diagnostic, config.tiny_imagenet_size
+        manifest,
+        split,
+        config.seed,
+        epoch,
+        diagnostic,
+        config.tiny_imagenet_size,
+        config.normalization,
     )
     generator = torch.Generator().manual_seed(key_seed("workers", config.seed, epoch, split))
     options = {

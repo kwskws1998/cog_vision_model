@@ -1,0 +1,22 @@
+{
+  "training": {
+    "dataset": "cifar100", "method": "erm", "seed": 0,
+    "activation": "preact", "initialization": "msra", "normalization": "zipfls",
+    "epochs": 200, "batch_size": 128, "eval_batch_size": 128,
+    "learning_rate": 0.1, "warmup_epochs": 0,
+    "momentum": 0.9, "weight_decay": 0.0001,
+    "milestones": [100, 150], "lr_decay": 0.1,
+    "precision": "fp32", "eval_precision": "fp32",
+    "workers": 4, "device": "cuda", "max_vram_gib": 28.0
+  },
+  "candidates": [
+    {"gate_tau": 0.15, "gate_temperature": 0.05, "joint_floor": 0.5},
+    {"gate_tau": 0.05, "gate_temperature": 0.05, "joint_floor": 0.5},
+    {"gate_tau": 0.30, "gate_temperature": 0.05, "joint_floor": 0.5},
+    {"gate_tau": 0.15, "gate_temperature": 0.05, "joint_floor": 0.0},
+    {"gate_tau": 0.05, "gate_temperature": 0.05, "joint_floor": 0.0},
+    {"gate_tau": 0.30, "gate_temperature": 0.05, "joint_floor": 0.0}
+  ],
+  "reserve_minutes": 20,
+  "time_safety_factor": 1.25
+}

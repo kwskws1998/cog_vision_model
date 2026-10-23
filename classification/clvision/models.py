@@ -55,7 +55,9 @@ class _ZipfPreActResNet18(nn.Module):
 class SmallResNet18(nn.Module):
     """Share the backbone and inference head; only Zipf adds a train-time auxiliary head."""
 
-    def __init__(self, classes, auxiliary=False, seed=0, activation="postact"):
+    def __init__(
+        self, classes, auxiliary=False, seed=0, activation="postact", initialization="reference"
+    ):
         super().__init__()
         if activation not in ACTIVATIONS:
             raise ValueError("activation must be 'postact' or 'preact'")
@@ -67,6 +69,15 @@ class SmallResNet18(nn.Module):
             network.maxpool = nn.Identity()
         else:
             network = _ZipfPreActResNet18(classes)
+        if initialization == "msra":
+            for layer in network.modules():
+                if isinstance(layer, nn.Conv2d):
+                    nn.init.kaiming_normal_(layer.weight, mode="fan_out", nonlinearity="relu")
+                elif isinstance(layer, nn.BatchNorm2d):
+                    nn.init.ones_(layer.weight)
+                    nn.init.zeros_(layer.bias)
+        elif initialization != "reference":
+            raise ValueError("Unknown initialization")
         self.backbone = nn.Sequential(
             network.conv1,
             network.bn1,
