@@ -2,6 +2,33 @@
 
 This file describes review scope. Actual pass counts and source fingerprints are written by the tests and audit under ignored `verification/` files.
 
+## Uploaded ERM archive audit, 2026-10-23
+
+The supplied `main.zip` SHA-256 is `c631422eed49b6131c2a2c73e14fb46940ac9a53487ff18094fe13fdc6189cb2`. It contains four ERM run directories, three completed training runs, and one incomplete training snapshot. It contains no final-test predictions, final-test metrics, or whole-study seal. Its contracts identify BF16 training and FP32 evaluation, not FP16. These are observations about this ZIP snapshot, not the current remote process.
+
+| Saved ERM run | Last saved epoch | Accepted updates | Online training accuracy | Internal validation accuracy |
+|---|---:|---:|---:|---:|
+| CIFAR-100 seed 0 | 200 | 8,800 | 99.9822% | 73.42% (5,000 images) |
+| CIFAR-100 seed 1 | 200 | 8,800 | 99.9867% | 73.48% (5,000 images) |
+| Tiny ImageNet 64px seed 0 | 200 | 17,600 | 99.9756% | 61.89% (10,000 images) |
+| Tiny ImageNet 64px seed 1 | 25 | 2,200 | 74.01% | 46.18% (10,000 images) |
+
+The incomplete Tiny seed 1 runtime snapshot says epoch 26, while its last durable checkpoint/history end at epoch 25. It has no final checkpoint, summary, or completion seal. The earlier CUE report contains official final-test accuracies: CIFAR 73.06%/73.29% and Tiny 62.25%/63.04%. Its confusion matrices independently reproduce those accuracies and the reported seed means/SDs. **Subtracting these CUE final-test scores from the ERM internal-validation scores would not estimate the intervention's effect.** No CUE training checkpoint or history was supplied in this ZIP, so actual historical CUE gate trajectories and ERM/CUE checkpoint duplication cannot be checked from it.
+
+Committed Git blobs reproduce both recorded source identities: ERM `4fb74cfa…` belongs to `6b57dc0a1b57db941a75810316907d076cf11e3f`; CUE `1462200e…` belongs to `1c06f8d43724987817348fc869bd02f6fb4ee92f`. Between those commits, the model, objective, and metric mathematics are unchanged; optional Tiny32 support preserves the original Tiny64 and CIFAR transforms. The configurations match apart from method/seed and the newly explicit default Tiny size. Current versus historical ERM/CUE execution also gives identical shared initialization, loss, and parameter gradients on a matched diagnostic input.
+
+Artifact integrity checks loaded all seven checkpoints using `weights_only=True`. All model tensors are finite, all four run model hashes differ, all canonical contract identities match, and all nine completion file hashes match. External histories equal checkpoint-embedded histories, and every completed final state equals its corresponding last state. Every one of 625 saved epoch records has the correct sample/update counts and requested learning rate; no AMP overflow retries were recorded. The recorded LR is 0.16 in epoch 1, 0.8 in epochs 5–100, 0.08 in epochs 101–150, and 0.008 thereafter.
+
+Independent pipeline checks verified ordinary fully trained ERM cross-entropy, all-parameter SGD, encoder-only autocast, FP32 readout/evaluation, restored training mode every epoch, evaluation without BatchNorm updates, and prediction-derived metrics. The local real dataset identities match the archive contracts. Independently reconstructed split membership is identical, class balanced, and disjoint: CIFAR 45k/5k/10k and Tiny 90k/10k/10k. Six targeted vanilla-ResNet, all-gradient, metric, augmentation, and BatchNorm regressions passed.
+
+For all four uploaded checkpoint states, an independently constructed torchvision ResNet, without importing the project model or loss, replayed every internal-validation image on CPU FP32: 30,000 image evaluations in total. The accuracies exactly reproduce **73.42%, 73.48%, 61.89%, and 46.18%**, with NLL differences below `5e-7` from the recorded CUDA FP32 evaluations. The last value belongs to the incomplete epoch-25 Tiny run. No official final-test images were opened. This supports the saved validation calculations and the observed generalization gap; it does not establish a CUE benefit.
+
+The CUE derivative was rederived independently in NumPy through features, shared classifier weights, and bias at 2/7/100/200 classes and unequal region areas. Maximum absolute error was `1.39e-16`. The actual `optimize_batch` path on identical initial weights and 16 actual CIFAR training images produces distinct ERM/CUE updates: PostAct L2 parameter difference `0.01854` across all 62 parameter tensors at LR 0.1; PreAct `0.009096` across 56 tensors. The all-joint endpoint matches ERM gradients exactly when using the same joint-logit graph; the direct-GAP production path differs by at most `1.23e-7` in updated PostAct parameters because of FP32 averaging order. No disabled CUE branch or gradient-cancellation error was found.
+
+The remaining structural concern is the intended correction itself: `delta_k = (a_k/B) * (1-gamma_k) * (p_local_k-p_joint)`. Agreement makes the correction small, while strong disagreement drives the gate toward the joint/ERM update and suppresses it again. Its default maximum cue-logit norm is approximately `0.0550534*a_k/B`; this is an absolute bound, not a 5.5% bound relative to ERM gradients. On one deterministic batch of 32 real training images, applying CUE counterfactually to the supplied ERM final weights changes the whole-parameter gradient by 11.57%/6.36% for CIFAR seeds 0/1 and 22.32% for Tiny seed 0. These CPU FP32, batch-32 diagnostics are **not measurements of the historical CUE training trajectory**, and BatchNorm conditions differ from batch 1024.
+
+The evidence supports working ERM/CUE implementations but does not show a positive CUE treatment effect. Similar accuracy can reflect an ineffective or weak regularizer rather than a software defect. A matched final-test ERM comparison is still missing from this attachment, and a fixed-consistency control remains necessary to attribute any improvement specifically to adaptive gates. No training objective or hyperparameter was changed in response to similarity alone. Reproduction scripts and machine-readable audit evidence are retained locally under `.cache/erm_archive_review_20261023/`; original uploaded files and historical contracts are unchanged.
+
 ## Data and experimental decisions
 
 - Original CIFAR fine classes, all200 Tiny classes, native dimensions, fixed stratified source validation, and content hashes are explicit.
