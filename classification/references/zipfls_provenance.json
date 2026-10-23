@@ -37,27 +37,6 @@
       "url": "https://raw.githubusercontent.com/megvii-research/zipfls/108e27aaf81aee0dc6dcd965ed6389f2ea06ba10/pytorch_zipfls/README.md",
       "file": "classification/references/zipfls/pytorch_zipfls__README.md.txt",
       "sha256": "8a0f6c3e64719797fb29b147e16374a68bc63d228a9c2b9cb36d1dc71a16788d"
-    },
-    {
-      "path": "pytorch_zipfls/datasets.py",
-      "url": "https://raw.githubusercontent.com/megvii-research/zipfls/108e27aaf81aee0dc6dcd965ed6389f2ea06ba10/pytorch_zipfls/datasets.py",
-      "file": "classification/references/zipfls/pytorch_zipfls__datasets.py.txt",
-      "sha256": "7641dc665f5842f22dfd307c07b4b00932b09831c0ab65abd00828ef4a80dfda",
-      "normalization": "UTF-8 text; trailing blank lines removed"
-    },
-    {
-      "path": "pytorch_zipfls/utils.py",
-      "url": "https://raw.githubusercontent.com/megvii-research/zipfls/108e27aaf81aee0dc6dcd965ed6389f2ea06ba10/pytorch_zipfls/utils.py",
-      "file": "classification/references/zipfls/pytorch_zipfls__utils.py.txt",
-      "sha256": "961c30033000a6d870601aa5f71bd91f4dcfd29961835baeeab20770a6c62577",
-      "normalization": "UTF-8 text; trailing blank lines removed"
-    },
-    {
-      "path": "pytorch_zipfls/gen_results_sheet.py",
-      "url": "https://raw.githubusercontent.com/megvii-research/zipfls/108e27aaf81aee0dc6dcd965ed6389f2ea06ba10/pytorch_zipfls/gen_results_sheet.py",
-      "file": "classification/references/zipfls/pytorch_zipfls__gen_results_sheet.py.txt",
-      "sha256": "6c694cc2670f9d7aac81dd59bb3b0596d46330b9c556e6e82fdacf38f441712c",
-      "normalization": "UTF-8 text; trailing blank lines removed"
     }
   ]
 }
