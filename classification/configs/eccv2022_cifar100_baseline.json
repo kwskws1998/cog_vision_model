@@ -1,0 +1,14 @@
+{
+  "epochs": 200,
+  "batch_size": 128,
+  "eval_batch_size": 128,
+  "learning_rate": 0.1,
+  "momentum": 0.9,
+  "weight_decay": 0.0001,
+  "milestones": [100, 150],
+  "lr_decay": 0.1,
+  "schedule": "official-code",
+  "seeds": [0],
+  "workers": 4,
+  "device": "cuda"
+}

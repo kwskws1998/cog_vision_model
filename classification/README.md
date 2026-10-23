@@ -4,9 +4,20 @@ This directory implements CIFAR-100, CIFAR-100-C, Tiny ImageNet-200 with explici
 
 The main comparison is ERM, uniform non-target label smoothing, fixed global-to-local self-distillation, Zipf's Label Smoothing dense2, and CUE. These are training interventions on a common small-image ResNet-18. Final inference is global average pooling and the shared final classifier. CUE does not adapt or choose cues during testing.
 
+## Reproduce the ECCV 2022 CIFAR-100 CE baseline
+
+Use [BASELINE_REPRODUCTION.md](BASELINE_REPRODUCTION.md) and
+`python classification/reproduce_baseline.py` for the standalone author-code reference.
+This trains one PreAct ResNet-18 on all 50,000 official training images and reports
+the 10,000-image official test accuracy. It does not use the ordinary study's 45k/5k
+internal split. Its default preset is FP32, batch 128, LR 0.1, 200 epochs, seed 0.
+It runs no CUE, distillation, search, corruption evaluation, or TinyImageNet job.
+Author-code and paper-text discrepancies in initialization and LR timing are
+documented explicitly; this is a reproduction attempt, not a verified reproduction of the score.
+
 ## Select PostAct or PreAct
 
-Every classification training mode accepts `--activation postact` or `--activation preact`: `erm`, `cue`, `ablation`, and full `train`/`study`. The same choice is supported by plans, CUDA profiles, and smoke verification. Omission preserves `postact`; all shipped presets explicitly retain that default. Set `"activation": "preact"` inside a JSON preset's `training` object to change its default. Dataset overrides may select a different backbone per dataset; an explicit CLI flag overrides both the common setting and all dataset overrides.
+The ordinary study modes accept `--activation postact` or `--activation preact`: `erm`, `cue`, `ablation`, and full `train`/`study`. The same choice is supported by plans, CUDA profiles, and smoke verification. Omission preserves `postact`; the ordinary study presets explicitly retain that default. The standalone author-code reference above always uses its pinned PreAct model. Set `"activation": "preact"` inside a study JSON preset's `training` object to change its default. Dataset overrides may select a different backbone per dataset; an explicit CLI flag overrides both the common setting and all dataset overrides.
 
 - `postact`: the existing torchvision ResNet-18 with a 3x3 stride-one stem and no maxpool. The selector preserves its original weights, state keys, RNG sequence, and predictions for the same seed.
 - `preact`: the backbone from the pinned [Zipf author code, revision 108e27a](https://github.com/megvii-research/zipfls/blob/108e27aaf81aee0dc6dcd965ed6389f2ea06ba10/pytorch_zipfls/cifar_models/resnet.py). It uses a Conv/BN/ReLU stem, eight pre-activation blocks, and no terminal BN/ReLU. In this specific reference, even the no-projection shortcut uses the **preactivated** tensor. It is not a generic identity-shortcut ResNet-v2. Backbone and final-head initialization follow that reference; the optional Zipf auxiliary head keeps our isolated initialization to preserve matched ERM/CUE/Zipf shared weights.
