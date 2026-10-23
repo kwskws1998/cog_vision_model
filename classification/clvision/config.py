@@ -60,6 +60,7 @@ class Config:
     workers: int = 4
     device: str = "cuda"
     precision: str = "fp16"
+    eval_precision: str = "fp32"
     max_vram_gib: float = 20.0
     gradient_clip: float = 0.0
     debug: bool = False
@@ -129,7 +130,11 @@ class Config:
             raise ValueError("Invalid smoothing, clipping, or memory settings")
         if self.device not in ("cpu", "cuda") or self.precision not in ("fp32", "fp16", "bf16"):
             raise ValueError("Unsupported device or precision")
-        if self.device == "cpu" and (self.precision != "fp32" or not self.debug):
+        if self.eval_precision not in ("fp32", "fp16", "bf16"):
+            raise ValueError("Unsupported evaluation precision")
+        if self.device == "cpu" and (
+            self.precision != "fp32" or self.eval_precision != "fp32" or not self.debug
+        ):
             raise ValueError("CPU is only supported as explicit FP32 debug verification")
         if self.debug_max_batches and not self.debug:
             raise ValueError("Reduced training requires explicit debug=true")

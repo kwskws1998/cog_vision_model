@@ -13,12 +13,18 @@ def classification_metrics(logits, targets, bins=15):
     logits, targets = logits.detach().double().cpu(), targets.detach().cpu()
     if logits.ndim != 2 or targets.shape != (len(logits),) or len(logits) == 0 or bins <= 0:
         raise ValueError("Metrics require nonempty NC logits and N labels")
-    if (
-        not torch.isfinite(logits).all()
-        or (targets < 0).any()
-        or (targets >= logits.shape[1]).any()
-    ):
-        raise ValueError("Invalid logits or labels")
+    if logits.shape[1] < 2:
+        raise ValueError("Metrics require at least two classes")
+    if (targets < 0).any() or (targets >= logits.shape[1]).any():
+        raise ValueError(
+            f"Labels outside [0, {logits.shape[1] - 1}]: "
+            f"min={int(targets.min())}, max={int(targets.max())}"
+        )
+    if not torch.isfinite(logits).all():
+        raise ValueError(
+            f"Nonfinite logits: nan={int(logits.isnan().sum())}, "
+            f"inf={int(logits.isinf().sum())}, shape={tuple(logits.shape)}"
+        )
     probabilities = logits.softmax(dim=1)
     confidence, prediction = probabilities.max(dim=1)
     correct = prediction.eq(targets)

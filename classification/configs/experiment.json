@@ -17,6 +17,7 @@
     "label_smoothing": 0.1,
     "device": "cuda",
     "precision": "fp16",
+    "eval_precision": "fp32",
     "max_vram_gib": 20.0,
     "gradient_clip": 0.0
   },

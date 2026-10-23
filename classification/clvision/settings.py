@@ -146,6 +146,7 @@ class StudySettings:
                 debug=True,
                 device="cpu",
                 precision="fp32",
+                eval_precision="fp32",
                 epochs=2,
                 milestones=(1,),
                 batch_size=2,

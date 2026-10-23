@@ -7,7 +7,7 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader
 
-from cue_routing.engine import autocast_context, validate_device, vram_stats
+from cue_routing.engine import validate_device, vram_stats
 from cue_routing.io import (
     atomic_json,
     atomic_torch,
@@ -53,6 +53,17 @@ def optimizer_for(model, config):
     )
 
 
+def validate_buffers(model):
+    """Reject corrupted running statistics even when the training loss and gradients are finite."""
+    buffers = {name: value for name, value in model.named_buffers() if value.is_floating_point()}
+    if (
+        buffers
+        and not torch.stack([torch.isfinite(value).all() for value in buffers.values()]).all()
+    ):
+        invalid = [name for name, value in buffers.items() if not torch.isfinite(value).all()]
+        raise FloatingPointError(f"Nonfinite model buffers before optimizer update: {invalid}")
+
+
 def optimize_batch(model, optimizer, scaler, images, targets, config):
     """Replay AMP overflow with identical buffers and RNG, counting only accepted updates."""
     enabled = scaler.is_enabled()
@@ -70,6 +81,7 @@ def optimize_batch(model, optimizer, scaler, images, targets, config):
         loss, diagnostics = training_objective(model, images, targets, config)
         if not torch.isfinite(loss):
             raise FloatingPointError("Nonfinite forward loss; no update was accepted")
+        validate_buffers(model)
         scaler.scale(loss).backward()
         scaler.unscale_(optimizer)
         invalid = any(
@@ -115,14 +127,54 @@ def optimize_batch(model, optimizer, scaler, images, targets, config):
 
 @torch.no_grad()
 def evaluate_loader(model, loader, config):
-    """Keep BatchNorm frozen during evaluation and collect the same final-head predictions."""
+    """Evaluate at the recorded independent precision, rejecting invalid batches with context."""
+    if (
+        config.device == "cuda"
+        and config.eval_precision == "bf16"
+        and not torch.cuda.is_bf16_supported()
+    ):
+        raise RuntimeError("This CUDA device does not support BF16 evaluation")
     model.eval()
     logits, labels = [], []
-    for images, targets in loader:
-        with autocast_context(config):
+    for batch_index, (images, targets) in enumerate(loader, start=1):
+        context = (
+            f"dataset={config.dataset} method={config.method} seed={config.seed} "
+            f"train_precision={config.precision} eval_precision={config.eval_precision} "
+            f"batch={batch_index}"
+        )
+        if targets.dtype != torch.long or targets.shape != (len(images),):
+            raise ValueError(f"Invalid evaluation label dtype/shape: {context}")
+        classes = len_classes(config.dataset)
+        if (targets < 0).any() or (targets >= classes).any():
+            raise ValueError(
+                f"Evaluation labels outside [0, {classes - 1}]: "
+                f"min={int(targets.min())} max={int(targets.max())}; {context}"
+            )
+        with torch.autocast(
+            device_type=config.device,
+            dtype=torch.float16 if config.eval_precision == "fp16" else torch.bfloat16,
+            enabled=config.eval_precision != "fp32",
+        ):
             output = model(images.to(config.device, non_blocking=True))
-        logits.append(output.cpu())
-        labels.append(targets.long().cpu())
+        output = output.float().cpu()
+        if output.shape != (len(images), classes):
+            raise ValueError(f"Invalid evaluation logits shape={tuple(output.shape)}; {context}")
+        if not torch.isfinite(output).all():
+            invalid_state = [
+                name
+                for name, value in model.state_dict().items()
+                if value.is_floating_point() and not torch.isfinite(value).all()
+            ]
+            raise FloatingPointError(
+                f"Nonfinite evaluation logits: {context}; "
+                f"nan={int(output.isnan().sum())} inf={int(output.isinf().sum())} "
+                f"nonfinite_inputs={int((~torch.isfinite(images)).sum())} "
+                f"nonfinite_model_tensors={invalid_state}. "
+                "No predictions accepted; use --eval-precision fp32 for reduced-precision "
+                "evaluation overflow, and inspect model/input diagnostics if FP32 also fails."
+            )
+        logits.append(output)
+        labels.append(targets.cpu())
     if not logits:
         raise ValueError("Empty evaluation partition")
     logits, labels = torch.cat(logits), torch.cat(labels)

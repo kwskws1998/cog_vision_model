@@ -57,7 +57,7 @@ conda activate "$PWD/.conda"
 mkdir -p results
 
 STAMP=$(date +%Y%m%d_%H%M%S)
-RUN_NAME="classification_fp16_b128_seeds0_1_${STAMP}"
+RUN_NAME="classification_trainfp16_evalfp32_b128_seeds0_1_${STAMP}"
 
 python -u classification/run.py train \
   --config classification/configs/experiment.json \
@@ -76,6 +76,7 @@ python -u classification/run.py train \
   --weight-decay 1e-4 \
   --lr-decay 0.1 \
   --precision fp16 \
+  --eval-precision fp32 \
   --device cuda \
   --workers 4 \
   --max-vram-gib 20 \
@@ -88,6 +89,10 @@ python -u classification/run.py train \
 Precedence is built-in defaults, JSON common training settings, JSON dataset-family schedules, JSON dataset overrides, then explicit CLI flags. Natural-image `--epochs`/`--milestones` and mechanism `--mechanism-epochs`/`--mechanism-milestones` are separate. Supply compatible milestones when changing epochs; `--milestones` with no values disables the natural-image milestone schedule. Validation grids and dataset-specific coefficients can be edited in JSON; each dataset keeps an equal positive candidate budget across the three tuned methods.
 
 The same resolved recipes drive CUDA preflight and training. Preflight checks every intervention using actual data, the requested training/evaluation batch sizes and precision, and ten accepted optimizer updates. A failed preflight stops the study. The workflow then develops on internal validation, freezes choices, trains all main/mechanism runs, seals the complete study, and evaluates the final checkpoints, including CIFAR-100-C. Results are written to the selected run directory as `comparison.json` and `comparison.md`.
+
+Training precision (`--precision`, default `fp16`) and evaluation precision (`--eval-precision`, default `fp32`) are independent, recorded settings. FP32 evaluation applies consistently to preflight validation, every epoch's validation, clean tests, mechanism diagnostics, and corruption tests. Early training with BatchNorm running statistics can produce validation activations outside FP16's range even when training updates are finite. Evaluation therefore defaults to FP32, without an automatic per-batch precision fallback. Preflight measures its actual throughput and memory cost. Explicit `fp16` and `bf16` evaluation remain available; a precision change requires a new study directory.
+
+Preflight failures retain `status=failed`, the dataset, method, stage, accepted update count, resolved recipe, and exception in `classification/verification/<dataset>_cuda.json`. Evaluation reports nonfinite logits separately from invalid label IDs and includes input/model-state diagnostics. Corrupted floating-point model buffers stop training before an optimizer update is accepted. Partially consumed preflight data loaders are shut down on failure so their worker/pin-memory errors do not obscure the original error. These checks do not clamp or replace invalid predictions.
 
 Timing is automatic. Preflight prints training/evaluation throughput for each dataset and method. Before the first full training run, `[study]` prints a provisional whole-study ETA based on those measurements. It includes development, all main/mechanism epochs, per-epoch validation, clean tests, mechanism panel diagnostics, and all 750 CIFAR-100-C checkpoint/condition evaluations under the default two-seed scope. Actual epoch times, including checkpoint writes, replace provisional rates as training proceeds; measured final evaluation times refine that stage's estimate. Startup, final sealing, report generation, and downtime are not predicted. An unavailable measurement is shown as `estimating`, never an invented duration.
 
