@@ -1,0 +1,37 @@
+{
+  "schema": 1,
+  "source_commit": "943ddeca3e21280942f778b56a11ebbae86c2751",
+  "purpose": "Historical one-off CIFAR-100 overnight runner; not a standalone runtime",
+  "files": [
+    {
+      "original_path": "classification/overnight.py",
+      "archived_path": "classification/overnight.py",
+      "sha256": "ff1562e734905a04e9d6de616571a0d9dc970caa7516a2f19d37c78f76712c06"
+    },
+    {
+      "original_path": "classification/configs/overnight_cifar100.json",
+      "archived_path": "classification/configs/overnight_cifar100.json",
+      "sha256": "c980ecfa4c672083e96df5d613aea1b963a92d371a72496b684b943626a0a2e3"
+    },
+    {
+      "original_path": "classification/clvision/overnight_settings.py",
+      "archived_path": "classification/clvision/overnight_settings.py",
+      "sha256": "cb2d7ae7596db5ef513fa284932e307028ffee88de205d2e35e3f22a1d8be1d2"
+    },
+    {
+      "original_path": "classification/clvision/overnight_workflow.py",
+      "archived_path": "classification/clvision/overnight_workflow.py",
+      "sha256": "049bfd8f022c9b3ca7f1ace781b9fdc77252440cbda10f899fea8c8cc32ac3a2"
+    },
+    {
+      "original_path": "classification/OVERNIGHT_CIFAR100.md",
+      "archived_path": "classification/OVERNIGHT_CIFAR100.md",
+      "sha256": "5e85bb3c8b26fc0508244e091d3ecfc0b8dea3d01c96bcf42f8e2603329a1b37"
+    },
+    {
+      "original_path": "classification/tests/test_classification_overnight.py",
+      "archived_path": "classification/tests/test_classification_overnight.py",
+      "sha256": "1f255daf6c519b4df468edd98d883773142ef3a8b20d8c055ad4198b26ec994a"
+    }
+  ]
+}

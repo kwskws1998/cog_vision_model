@@ -457,8 +457,8 @@ def load_manifest(path, verify_bytes=True, root_override=None, defer_test=False)
         raise ValueError("Dataset manifest identity mismatch")
     root = Path(root_override or value["root"]).resolve()
     value["root"] = str(root)
-    if defer_test and value["dataset"] != "cifar100":
-        raise ValueError("Deferred test verification is supported only for CIFAR-100")
+    if defer_test and value["dataset"] not in ("cifar100", "tiny_imagenet"):
+        raise ValueError("Deferred test verification supports CIFAR-100 and TinyImageNet")
     files = [
         item
         for key, item in value.get("arrays", {}).items()
@@ -475,7 +475,7 @@ def load_manifest(path, verify_bytes=True, root_override=None, defer_test=False)
             array = read_array(root, item)
             if list(array.shape) != item["shape"] or str(array.dtype) != item["dtype"]:
                 raise ValueError("Dataset array schema changed")
-    for row in value.get("records", []) + value.get("test_records", []):
+    for row in value.get("records", []) + ([] if defer_test else value.get("test_records", [])):
         file = relative_file(root, row[0])
         if not file.is_file() or (verify_bytes and file_hash(file) != row[2]):
             raise ValueError(f"Dataset image changed: {file}")

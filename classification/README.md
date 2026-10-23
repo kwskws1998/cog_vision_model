@@ -4,18 +4,26 @@ This directory implements CIFAR-100, CIFAR-100-C, Tiny ImageNet-200 with explici
 
 The main comparison is ERM, uniform non-target label smoothing, fixed global-to-local self-distillation, Zipf's Label Smoothing dense2, and CUE. These are training interventions on a common small-image ResNet-18. Final inference is global average pooling and the shared final classifier. CUE does not adapt or choose cues during testing.
 
-## One-seed overnight ERM/CUE comparison
+## Editable Python experiments
 
-Use [OVERNIGHT_CIFAR100.md](OVERNIGHT_CIFAR100.md) for a CIFAR-100-only PreAct
-comparison with 45,000 train / 5,000 validation / 10,000 final test examples.
-`python classification/overnight.py` fixes the common paper-oriented recipe and
-tunes only CUE parameters on validation, using a single seed and measured deadline
-admission. Final tests are sealed until selection closes. The selected checkpoint
-is reused without a second training run. This dedicated preset opts into MSRA
-convolution initialization and author normalization; ordinary study defaults remain
-unchanged. Its held-out split is explicitly not an exact published-score reproduction.
-All CUE candidates are preflighted before long training; CUE tuning runs first,
-followed by the fixed ERM baseline. Each candidate admission reserves time for ERM.
+Use [experiments/erm_cue.py](experiments/erm_cue.py) for the current paired ERM/CUE
+experiment. Its `COMMON`, `DATASETS`, `SEEDS`, `TUNING`, `CUE_GRID`, `STAGES`, and
+`BUDGET` inputs declare the training recipe, tuning candidates, execution order,
+and optional time limit.
+Changing these inputs does not require editing the model, trainer, or orchestration
+implementation. Both methods receive the same common recipe; only CUE-specific
+parameters vary within its search.
+
+[EXPERIMENTS.md](EXPERIMENTS.md) documents the Python API, preview, synthetic smoke,
+server execution, and resume behavior. `tune` and `baseline` can be reordered in
+the script. The `evaluate` stage remains guarded until selection and both models'
+training are complete. CIFAR-100 uses 45,000 train / 5,000 validation / 10,000 final
+test examples, and hyperparameter selection uses validation only.
+
+The superseded fixed overnight driver is preserved in
+[legacy/classification_overnight](../legacy/classification_overnight/README.md).
+The other commands below remain available for their distinct fixed-method,
+multi-dataset, ablation, and full-study workflows.
 
 ## Select PostAct or PreAct
 

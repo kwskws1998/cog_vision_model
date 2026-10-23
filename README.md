@@ -37,6 +37,8 @@ conda run --no-capture-output --prefix ./.conda python experiment.py pretrained-
 conda run --no-capture-output --prefix ./.conda python experiment.py profile
 ```
 
+For the current ERM/CUE comparison, use the [editable Python experiment](classification/EXPERIMENTS.md). Hyperparameters, seed count, CUE search candidates, stage order, and deadline are supplied by the experiment script rather than fixed inside the workflow. The superseded overnight runner is preserved under [legacy](legacy/README.md).
+
 Classification training now has [Trainer-style step progress, evaluation bars, and structured logs](classification/README.md#trainer-style-progress-logging), enabled by default and configurable without changing the training recipe.
 
 For the next fixed-recipe classification controls, use [ERM-only first, then matched Tiny ImageNet 32px ERM/CUE](classification/README.md#erm-first-then-tiny-imagenet-at-32px). These commands reuse prepared data and the existing Conda environment.

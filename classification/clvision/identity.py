@@ -16,7 +16,7 @@ def source_hash(root):
         if path.is_file()
         and path.suffix in (".py", ".json", ".txt", ".yml", ".toml")
         and not set(path.relative_to(extension).parts)
-        & {"verification", "__pycache__", ".cache", ".ruff_cache", "data", "runs"}
+        & {"verification", "__pycache__", ".cache", ".ruff_cache", "data", "runs", "experiments"}
     ]
     return canonical_hash(
         {
