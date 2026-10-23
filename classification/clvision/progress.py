@@ -10,6 +10,8 @@ from zoneinfo import ZoneInfo
 
 from cue_routing.io import atomic_json, read_json
 
+from .display import write
+
 CURRENT_PROGRESS = ContextVar("classification_progress", default=None)
 
 
@@ -60,6 +62,7 @@ class StudyProgress:
         self.rates, self.jobs = {}, {}
         self.status, self.stage, self.active = "running", "training", None
         self.last_emit = -math.inf
+        self.last_console = -math.inf
         self.active_batch = None
         for key, (config, phase) in planned_jobs(plan).items():
             dataset, method = config["dataset"], config["method"]
@@ -97,6 +100,7 @@ class StudyProgress:
                 "phase": phase,
                 "epochs": config["epochs"],
                 "epochs_done": config["epochs"] if complete else epochs_done,
+                "batches_per_epoch": math.ceil(train_n / config["batch_size"]),
                 "complete": complete,
                 "train_images": train_n,
                 "validation_images": len(splits["validation"]),
@@ -139,7 +143,15 @@ class StudyProgress:
         job = self.jobs[key]
         rate = self.rates[(job["dataset"], job["method"])]
         self.active = key
-        self.stage = "training" if event.startswith("train") else "final_evaluation"
+        self.stage = (
+            "training"
+            if event.startswith("train")
+            else "validation"
+            if event == "validation_start"
+            else "checkpoint"
+            if event == "checkpoint_start"
+            else "final_evaluation"
+        )
         if event == "train_start":
             job["epochs_done"] = values["completed_epochs"]
             self.active_batch = None
@@ -161,6 +173,7 @@ class StudyProgress:
             self.active_batch = None
         elif event == "clean_complete":
             job["clean_done"] = True
+            self.active_batch = None
             if values.get("seconds", 0) > 0:
                 rate["eval_images_per_second"] = job["clean_images"] / values["seconds"]
                 rate["eval_startup_seconds"] = 0
@@ -168,7 +181,17 @@ class StudyProgress:
             job["corruption_done"] = values["completed_cells"]
             if values.get("seconds", 0) > 0:
                 rate["corruption_images_per_second"] = job["cell_images"] / values["seconds"]
-        self.emit(force=event != "train_batch")
+        self.emit(
+            force=event != "train_batch",
+            announce=event
+            in (
+                "train_start",
+                "train_complete",
+                "clean_start",
+                "clean_complete",
+                "corruption_start",
+            ),
+        )
 
     def estimate(self):
         """Sum remaining training, validation, clean diagnostics, and corruption evaluation work."""
@@ -267,8 +290,8 @@ class StudyProgress:
             ],
         }
 
-    def emit(self, force=False, error=None):
-        """Write a current progress snapshot and a human-readable line at least every 30 training seconds."""
+    def emit(self, force=False, error=None, announce=None):
+        """Persist phase/epoch state promptly while throttling permanent study-level console lines."""
         now = time.monotonic()
         if not force and now - self.last_emit < 30:
             return
@@ -293,6 +316,12 @@ class StudyProgress:
         clean_done = sum(job["clean_done"] for job in clean_jobs)
         cells_done = sum(job["corruption_done"] for job in self.jobs.values())
         cells_total = sum(job["corruption_cells"] for job in self.jobs.values())
+        total_steps = sum(job["epochs"] * job["batches_per_epoch"] for job in self.jobs.values())
+        completed_steps = sum(
+            job["epochs_done"] * job["batches_per_epoch"] for job in self.jobs.values()
+        )
+        if self.active_batch:
+            completed_steps += self.active_batch["batch"]
         payload = {
             "schema": 1,
             "status": self.status,
@@ -307,6 +336,9 @@ class StudyProgress:
             "total_corruption_cells": cells_total,
             "active_run": self.active,
             "active_batch": self.active_batch,
+            "completed_training_steps": completed_steps,
+            "total_training_steps": total_steps,
+            "training_progress_percent": 100 * completed_steps / total_steps if total_steps else 0,
             "estimated_training_remaining_seconds": training
             if not any(":training" in key for key in unknown)
             else None,
@@ -325,11 +357,14 @@ class StudyProgress:
             "error": error,
         }
         atomic_json(self.directory / "progress.json", payload)
-        print(
+        if not (force if announce is None else announce) and now - self.last_console < 30:
+            return
+        self.last_console = now
+        write(
             f"[study] stage={self.stage} runs={done}/{len(self.jobs)} "
+            f"train_steps={completed_steps}/{total_steps} "
             f"clean={clean_done}/{len(clean_jobs)} corruptions={cells_done}/{cells_total} "
             f"elapsed={duration(now - self.started)} remaining~={duration(remaining)} "
             f"epoch_rates={details['observed_training_groups']}/{details['pending_training_groups']} "
             f"finish_KST~={finish or 'estimating'} active={self.active or 'none'}",
-            flush=True,
         )

@@ -37,6 +37,8 @@ conda run --no-capture-output --prefix ./.conda python experiment.py pretrained-
 conda run --no-capture-output --prefix ./.conda python experiment.py profile
 ```
 
+Classification training now has [Trainer-style step progress, evaluation bars, and structured logs](classification/README.md#trainer-style-progress-logging), enabled by default and configurable without changing the training recipe.
+
 For the next fixed-recipe classification controls, use [ERM-only first, then matched Tiny ImageNet 32px ERM/CUE](classification/README.md#erm-first-then-tiny-imagenet-at-32px). These commands reuse prepared data and the existing Conda environment.
 
 For CIFAR/Tiny ImageNet classification, use the [matched ERM/CUE ablation and bounded tuning workflow](classification/README.md#matched-resnet-ablation-and-bounded-tuning), or the [fixed CUE-only RTX 5090 workflow](classification/README.md#cue-first-on-rtx-5090). Both include explicit seed and hyperparameter flags, a dry-run preview, timestamped logs, and resume instructions.

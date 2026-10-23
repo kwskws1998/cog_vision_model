@@ -2,6 +2,7 @@
 
 import math
 import time
+from contextlib import ExitStack
 from pathlib import Path
 
 import torch
@@ -24,7 +25,8 @@ from cue_routing.io import (
 from cue_routing.metrics import classification_metrics
 
 from .config import CORRUPTIONS, Config, learning_rate_for_epoch
-from .data import CorruptionDataset, load_manifest, make_loader
+from .data import CorruptionDataset, EpochBatches, load_manifest, make_loader
+from .display import BatchProgress, TrainingLog, write
 from .identity import source_hash
 from .losses import training_objective
 from .models import SmallResNet18
@@ -131,7 +133,7 @@ def optimize_batch(model, optimizer, scaler, images, targets, config):
 
 
 @torch.no_grad()
-def evaluate_loader(model, loader, config):
+def evaluate_loader(model, loader, config, *, progress_name=None, position=0):
     """Evaluate at the recorded independent precision, rejecting invalid batches with context."""
     if (
         config.device == "cuda"
@@ -141,45 +143,56 @@ def evaluate_loader(model, loader, config):
         raise RuntimeError("This CUDA device does not support BF16 evaluation")
     model.eval()
     logits, labels = [], []
-    for batch_index, (images, targets) in enumerate(loader, start=1):
-        context = (
-            f"dataset={config.dataset} method={config.method} seed={config.seed} "
-            f"train_precision={config.precision} eval_precision={config.eval_precision} "
-            f"batch={batch_index}"
-        )
-        if targets.dtype != torch.long or targets.shape != (len(images),):
-            raise ValueError(f"Invalid evaluation label dtype/shape: {context}")
-        classes = len_classes(config.dataset)
-        if (targets < 0).any() or (targets >= classes).any():
-            raise ValueError(
-                f"Evaluation labels outside [0, {classes - 1}]: "
-                f"min={int(targets.min())} max={int(targets.max())}; {context}"
+    with BatchProgress(
+        progress_name or "Evaluation",
+        len(loader) if progress_name else 0,
+        enabled=progress_name is not None,
+        position=position,
+        leave=False,
+    ) as progress:
+        for batch_index, (images, targets) in enumerate(loader, start=1):
+            context = (
+                f"dataset={config.dataset} method={config.method} seed={config.seed} "
+                f"train_precision={config.precision} eval_precision={config.eval_precision} "
+                f"batch={batch_index}"
             )
-        with torch.autocast(
-            device_type=config.device,
-            dtype=torch.float16 if config.eval_precision == "fp16" else torch.bfloat16,
-            enabled=config.eval_precision != "fp32",
-        ):
-            output = model(images.to(config.device, non_blocking=True))
-        output = output.float().cpu()
-        if output.shape != (len(images), classes):
-            raise ValueError(f"Invalid evaluation logits shape={tuple(output.shape)}; {context}")
-        if not torch.isfinite(output).all():
-            invalid_state = [
-                name
-                for name, value in model.state_dict().items()
-                if value.is_floating_point() and not torch.isfinite(value).all()
-            ]
-            raise FloatingPointError(
-                f"Nonfinite evaluation logits: {context}; "
-                f"nan={int(output.isnan().sum())} inf={int(output.isinf().sum())} "
-                f"nonfinite_inputs={int((~torch.isfinite(images)).sum())} "
-                f"nonfinite_model_tensors={invalid_state}. "
-                "No predictions accepted; use --eval-precision fp32 for reduced-precision "
-                "evaluation overflow, and inspect model/input diagnostics if FP32 also fails."
-            )
-        logits.append(output)
-        labels.append(targets.cpu())
+            if targets.dtype != torch.long or targets.shape != (len(images),):
+                raise ValueError(f"Invalid evaluation label dtype/shape: {context}")
+            classes = len_classes(config.dataset)
+            if (targets < 0).any() or (targets >= classes).any():
+                raise ValueError(
+                    f"Evaluation labels outside [0, {classes - 1}]: "
+                    f"min={int(targets.min())} max={int(targets.max())}; {context}"
+                )
+            with torch.autocast(
+                device_type=config.device,
+                dtype=torch.float16 if config.eval_precision == "fp16" else torch.bfloat16,
+                enabled=config.eval_precision != "fp32",
+            ):
+                output = model(images.to(config.device, non_blocking=True))
+            output = output.float().cpu()
+            if output.shape != (len(images), classes):
+                raise ValueError(
+                    f"Invalid evaluation logits shape={tuple(output.shape)}; {context}"
+                )
+            if not torch.isfinite(output).all():
+                invalid_state = [
+                    name
+                    for name, value in model.state_dict().items()
+                    if value.is_floating_point() and not torch.isfinite(value).all()
+                ]
+                raise FloatingPointError(
+                    f"Nonfinite evaluation logits: {context}; "
+                    f"nan={int(output.isnan().sum())} inf={int(output.isinf().sum())} "
+                    f"nonfinite_inputs={int((~torch.isfinite(images)).sum())} "
+                    f"nonfinite_model_tensors={invalid_state}. "
+                    "No predictions accepted; use --eval-precision fp32 for reduced-precision "
+                    "evaluation overflow, and inspect model/input diagnostics if FP32 also fails."
+                )
+            logits.append(output)
+            labels.append(targets.cpu())
+            if progress_name:
+                progress.update(batch_index)
     if not logits:
         raise ValueError("Empty evaluation partition")
     logits, labels = torch.cat(logits), torch.cat(labels)
@@ -304,7 +317,7 @@ def train(
     if type(endpoint) is not int or not 0 < endpoint <= config.epochs:
         raise ValueError("Interruption must be a complete declared epoch")
     run_dir, root = Path(run_dir), Path(root)
-    with run_lock(run_dir):
+    with run_lock(run_dir), ExitStack() as displays:
         content = [
             path for path in run_dir.iterdir() if path.name not in (".writer.lock", ".running.json")
         ]
@@ -375,17 +388,30 @@ def train(
         if config.device == "cuda":
             torch.cuda.reset_peak_memory_stats()
         status = runtime_status(run_dir, config, "training_start", start + 1)
-        print(
+        write(
             f"[run] pid={status['pid']} directory={run_dir.resolve()} "
             f"input={config.input_shape[0]}x{config.input_shape[1]} "
             f"dataset={config.dataset} method={config.method} seed={config.seed} "
             f"train_batch={config.batch_size} eval_batch={config.eval_batch_size} "
             f"precision={config.precision}/{config.eval_precision} workers={config.workers} "
             f"vram_ceiling={config.max_vram_gib:g} GiB",
-            flush=True,
         )
         began = time.monotonic()
         progress_event(run_dir, "train_start", completed_epochs=start)
+        batches_per_epoch = len(
+            EpochBatches(
+                len(manifest["splits"]["train"]),
+                config.batch_size,
+                config.seed,
+                1,
+                config.debug_max_batches,
+            )
+        )
+        if steps != start * batches_per_epoch:
+            raise ValueError("Checkpoint optimizer steps differ from completed epoch budget")
+        logging = displays.enter_context(
+            TrainingLog(config, run_dir, config.epochs * batches_per_epoch, steps)
+        )
         last_progress = began
         for epoch in range(start + 1, endpoint + 1):
             rate = learning_rate_for_epoch(config, epoch)
@@ -413,18 +439,21 @@ def train(
                 steps += 1
                 images_seen += len(targets)
                 retries += result["amp_overflow_retries"]
+                logging.step(steps, epoch, count, len(loader), len(targets), result, rate)
                 now = time.monotonic()
-                if now - last_progress >= 30:
-                    print(
-                        f"[batch] {config.dataset} {config.method} seed={config.seed} "
-                        f"epoch={epoch}/{config.epochs} batch={count}/{len(loader)} "
-                        f"epoch_elapsed={duration(now - epoch_began)}",
-                        flush=True,
-                    )
+                if now - last_progress >= 30 or count == len(loader):
                     progress_event(
                         run_dir, "train_batch", epoch=epoch, batch=count, batches=len(loader)
                     )
-                    runtime_status(run_dir, config, "training", epoch, batch=count)
+                    runtime_status(
+                        run_dir,
+                        config,
+                        "training",
+                        epoch,
+                        batch=count,
+                        accepted_optimizer_steps=steps,
+                        total_steps=config.epochs * batches_per_epoch,
+                    )
                     last_progress = now
             if count == 0:
                 raise ValueError("Empty training epoch")
@@ -435,10 +464,16 @@ def train(
             train_seconds = time.monotonic() - epoch_began
             timings["training_seconds"] = train_seconds
             timings["step_and_host_seconds"] = max(0, train_seconds - timings["data_wait_seconds"])
+            logging.meter.stage("validation")
+            progress_event(run_dir, "validation_start", epoch=epoch)
             runtime_status(run_dir, config, "validation", epoch)
             validation_began = time.monotonic()
             validation = evaluate_loader(
-                model, make_loader(manifest, config, "validation"), config
+                model,
+                make_loader(manifest, config, "validation"),
+                config,
+                progress_name=f"Eval {config.dataset}/{config.method}/s{config.seed} epoch={epoch}",
+                position=1,
             )[0]
             validation = {key: value for key, value in validation.items() if key != "confusion"}
             validation_seconds = time.monotonic() - validation_began
@@ -471,6 +506,8 @@ def train(
                 "rng": capture_rng(config.device),
                 "contract_hash": canonical_hash(contract),
             }
+            logging.meter.stage("checkpoint")
+            progress_event(run_dir, "checkpoint_start", epoch=epoch)
             runtime_status(run_dir, config, "checkpoint", epoch)
             checkpoint_began = time.monotonic()
             atomic_torch(run_dir / "last.pt", checkpoint)
@@ -486,18 +523,20 @@ def train(
             eta = (time.monotonic() - began) * (config.epochs - epoch) / (epoch - start)
             memory = history[-1]["vram"].get("peak_reserved_gib")
             memory_text = f"{memory:.2f} GiB" if memory is not None else "unmeasured"
-            print(
-                f"{config.dataset} {config.method} seed={config.seed} epoch={epoch}/{config.epochs} val_accuracy={validation['accuracy']:.4f} loss={history[-1]['training']['loss']:.4f} elapsed={duration(elapsed)} run_remaining~={duration(eta)} elapsed_s={elapsed:.1f} eta_s={eta:.1f}",
-                flush=True,
+            logging.record(
+                "epoch",
+                **history[-1],
+                checkpoint_seconds=checkpoint_seconds,
+                run_remaining_seconds=eta,
             )
-            print(
-                f"[performance] train_batch={config.batch_size} "
-                f"images/s={history[-1]['training_images_per_second']:.1f} "
-                f"data_wait={timings['data_wait_seconds']:.2f}s "
-                f"step_and_host={timings['step_and_host_seconds']:.2f}s "
-                f"validation={validation_seconds:.2f}s checkpoint={checkpoint_seconds:.2f}s "
-                f"peak_reserved={memory_text}",
-                flush=True,
+            write(
+                f"[epoch] {config.dataset}/{config.method}/s{config.seed} "
+                f"epoch={epoch}/{config.epochs} step={steps}/{logging.total_steps} "
+                f"loss={history[-1]['training']['loss']:.4f} "
+                f"eval_loss={validation['nll']:.4f} eval_accuracy={validation['accuracy']:.4f} "
+                f"lr={rate:.6g} images/s={history[-1]['training_images_per_second']:.1f} "
+                f"peak_reserved={memory_text} elapsed={duration(elapsed)} "
+                f"run_remaining~={duration(eta)}"
             )
             progress_event(
                 run_dir,
@@ -627,7 +666,12 @@ def evaluate_run(manifest, run_dir, root, study_seal):
         record_access(run_dir, study_seal, "clean_test")
         loader = make_loader(manifest, config, "test")
         began = time.monotonic()
-        metrics, logits, labels = evaluate_loader(model, loader, config)
+        metrics, logits, labels = evaluate_loader(
+            model,
+            loader,
+            config,
+            progress_name=f"Test {config.dataset}/{config.method}/s{config.seed}",
+        )
         duration = time.monotonic() - began
         result = {
             "dataset": config.dataset,
@@ -643,7 +687,10 @@ def evaluate_run(manifest, run_dir, root, study_seal):
             result["cue_conflict"] = dominoes_metrics(logits, labels)
             result["panel_diagnostics"] = {
                 name: evaluate_loader(
-                    model, make_loader(manifest, config, "test", diagnostic=name), config
+                    model,
+                    make_loader(manifest, config, "test", diagnostic=name),
+                    config,
+                    progress_name=f"Test {config.dataset}/{config.method}/s{config.seed} {name}",
                 )[0]
                 for name in ("vehicle_only", "digit_only")
             }
@@ -698,7 +745,12 @@ def evaluate_corruptions(corruptions, clean, run_dir, root, study_seal):
                     shuffle=False,
                     generator=torch.Generator().manual_seed(0),
                 )
-                metrics = evaluate_loader(model, loader, config)[0]
+                metrics = evaluate_loader(
+                    model,
+                    loader,
+                    config,
+                    progress_name=f"CIFAR100-C/{config.method}/s{config.seed} {key}",
+                )[0]
                 existing["cells"][key] = {
                     name: value for name, value in metrics.items() if name != "confusion"
                 }

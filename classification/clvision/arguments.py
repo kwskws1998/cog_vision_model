@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from .display import add_display_arguments
 from .settings import StudySettings
 
 TRAINING_FIELDS = {
@@ -41,6 +42,7 @@ def add_study_arguments(parser, root):
     parser.add_argument("--mechanism-milestones", type=int, nargs="*")
     for name, value_type in TRAINING_FIELDS.items():
         parser.add_argument("--" + name.replace("_", "-"), type=value_type)
+    add_display_arguments(parser)
 
 
 def load_study_arguments(arguments):
@@ -113,6 +115,9 @@ def study_argument_tokens(arguments):
         "milestones",
         "mechanism_epochs",
         "mechanism_milestones",
+        "progress",
+        "logging_steps",
+        "progress_interval",
         *TRAINING_FIELDS,
     )
     for name in names:

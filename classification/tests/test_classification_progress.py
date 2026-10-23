@@ -5,6 +5,7 @@ import io
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from clvision.config import Config
 from clvision.progress import CURRENT_PROGRESS, StudyProgress, duration, progress_event
@@ -208,3 +209,34 @@ class StudyProgressTests(unittest.TestCase):
             details["datasets"]["cifar100"],
             {"training_seconds": None, "evaluation_seconds": None, "total_seconds": None},
         )
+
+    def test_phase_snapshots_and_step_counts_remain_current_when_console_is_throttled(self):
+        """Validation and checkpoint snapshots keep accepted train steps without double counting."""
+        self.plan["resolved_recipes"]["cifar100"]["batch_size"] = 64
+        tracker = self.tracker()
+        output = io.StringIO()
+        with (
+            contextlib.redirect_stdout(output),
+            patch("clvision.progress.time.monotonic", return_value=tracker.started + 1),
+        ):
+            tracker.update(self.main, "train_start", completed_epochs=0)
+            tracker.update(self.main, "train_batch", epoch=1, batch=2, batches=2)
+            tracker.update(self.main, "validation_start", epoch=1)
+            state = read_json(self.folder / "progress.json")
+            self.assertEqual(state["stage"], "validation")
+            self.assertEqual(state["completed_training_steps"], 2)
+            tracker.update(self.main, "checkpoint_start", epoch=1)
+            self.assertEqual(read_json(self.folder / "progress.json")["stage"], "checkpoint")
+            tracker.update(
+                self.main,
+                "train_epoch",
+                epoch=1,
+                epoch_seconds=20,
+                training_seconds=12,
+                validation_seconds=4,
+            )
+            state = read_json(self.folder / "progress.json")
+            self.assertEqual(state["completed_training_steps"], 2)
+            self.assertEqual(state["total_training_steps"], 40)
+            self.assertEqual(state["training_progress_percent"], 5)
+        self.assertEqual(output.getvalue().count("[study]"), 1)

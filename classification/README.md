@@ -4,6 +4,36 @@ This directory implements CIFAR-100, CIFAR-100-C, Tiny ImageNet-200 with explici
 
 The main comparison is ERM, uniform non-target label smoothing, fixed global-to-local self-distillation, Zipf's Label Smoothing dense2, and CUE. These are training interventions on a common small-image ResNet-18. Final inference is global average pooling and the shared final classifier. CUE does not adapt or choose cues during testing.
 
+## Trainer-style progress logging
+
+The classification runners now use a run-wide optimizer-step progress bar, following the presentation used by the decoder VA project's Transformers Trainer. It is enabled by default for `erm`, `cue`, `ablation`, and full `train`/`study` runs, including output piped through `tee`. Training, validation, final-test, and CUDA preflight displays identify the dataset, method, and seed where applicable.
+
+```text
+Train tiny_imagenet/cue/s0:  25%|##5       | 4400/17600 [..., epoch=50.00/200, loss=..., lr=..., stage=train]
+Eval tiny_imagenet/cue/s0 epoch=50: ...
+[train] step=4600/17600 epoch=52.273 loss=... accuracy=... lr=...
+[epoch] tiny_imagenet/cue/s0 epoch=53/200 step=4664/17600 loss=... eval_loss=... eval_accuracy=... lr=... images/s=... peak_reserved=... elapsed=... run_remaining~=...
+[study] stage=training runs=... train_steps=... clean=... remaining~=... finish_KST~=...
+```
+
+These are format examples, not measured performance. An optimizer step is counted only after a successful update; internal FP16 overflow retries do not advance it. `eval_loss` is global classification NLL, not CUE's combined classification-plus-consistency training objective. For 90,000 Tiny training images at batch 1,024, the loader uses **88** batches per epoch and **17,600** steps over 200 epochs. CIFAR uses **44** batches and **8,800** total steps. The code derives these counts from the loader budget, including the final partial batch and explicit debug limits.
+
+Optional presentation flags:
+
+```bash
+--progress bar \
+--logging-steps 200 \
+--progress-interval 1
+```
+
+`bar` renders a live tqdm display and is the default. `plain` emits newline snapshots without carriage returns or cursor controls; use `--progress plain --progress-interval 10` for a clean text log. `off` hides progress displays while retaining periodic metrics, epoch summaries, study summaries, and saved telemetry. The refresh interval is in seconds; the logging interval counts accepted optimizer steps. These flags are presentation settings, separate from frozen training hyperparameters, and can change on a resume with the same executable source.
+
+Each run writes `training_log.jsonl` with sample-weighted training windows, per-epoch training/validation metrics, learning rate, timing, memory, and session-end status. A fresh session ID and `resumed_from_step` identify each restart: records from an interrupted attempt are retained, while the checkpoint remains authoritative for completed training. The bar starts at the checkpoint's accepted step count, and its rate uses only newly executed work. Failures close the bar at the last accepted step. Complete runs reused from disk are not retrained.
+
+The bar's remaining time estimates pending optimizer steps from this session's observed rate. The epoch's `run_remaining~` includes observed validation/checkpoint overhead. The separate `[study]` ETA includes all declared runs and final evaluations, with provisional dataset rates identified in `progress.json`. Finishing the training bar does not mean the final tests have completed. Detailed host-wait, validation, and checkpoint timings remain in the JSON telemetry rather than a second permanent console line every epoch.
+
+`tqdm==4.70.1` is now an explicit dependency in `requirements.txt` (and is included through the CUDA/CPU requirements files). Install requirements in the existing project Conda environment if needed. Update source only between experiments: an existing process does not acquire new logging code, and the source-bound resume guard still rejects checkpoints from different executable versions.
+
 ## ERM first, then Tiny ImageNet at 32px
 
 `classification/run.py erm` trains only the plain cross-entropy ResNet-18 baseline. The [`erm_5090.json`](configs/erm_5090.json) preset uses the same fixed optimizer, architecture, initialization, data split, augmentation, batch sizes, precision, and schedule as the original CUE-only 5090 preset. Its four runs are CIFAR-100 32px and Tiny ImageNet 64px, each with seeds 0 and 1. It does not rerun the completed CUE jobs. Compare its `erm_measured` results with the original `cue_measured` results, retaining both reports and their source identities; this command does not import, alter, or claim to have revalidated the historical checkpoints.
@@ -12,7 +42,7 @@ The separate [`tiny32_ablation_5090.json`](configs/tiny32_ablation_5090.json) pr
 
 `--tiny-imagenet-size 32` applies Pillow bilinear resizing before augmentation and normalization in **training, internal validation, and final evaluation**. The 32px crop has zero padding 4 and the 64px crop has padding 8, preserving the relative augmentation width. CIFAR processing is unchanged. The original 64px dataset files, split identities, and labels remain unchanged, so prepared data need not be downloaded or converted again. Resolution is stored in every recipe/contract, bound into preflight signatures, printed in the run log, and reported using the actual model input size. A different resolution requires a new run directory.
 
-Finish any currently running training before updating executable sources. Update through GitHub and verify the existing environment; there are no new requirements for these options:
+Finish any currently running training before updating executable sources. Update through GitHub, install the pinned requirements in the existing environment, and verify CUDA:
 
 ```bash
 (
@@ -22,6 +52,7 @@ cd /workspace/cog_vision_model
 git pull --ff-only origin main
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate "$PWD/.conda"
+python -m pip install -r requirements-cuda.txt
 python bootstrap.py --device cuda --verify-only
 )
 ```
@@ -236,7 +267,7 @@ python -u classification/run.py cue \
 
 Add `--dry-run` to preview the resolved settings and run count without data/CUDA access. Explicit CLI values override both common JSON settings and dataset overrides. To run just one job, use `--datasets cifar100 --seeds 0`. To resume, repeat the same command with the **original fixed `--runs-dir`**, identical settings, and unchanged source/environment; do not generate a new timestamp. Completed jobs and predictions are verified and reused.
 
-Every training job prints a `[run]` line containing its PID, actual batch sizes, precision, workers, and run directory. Each epoch prints `[performance]` with images/second, time waiting for data (including worker startup/teardown), step-and-host time, validation time, checkpoint time, and peak reserved VRAM. Step-and-host time includes transfers and Python work; it is not a CUDA-kernel-only measurement. `runtime_status.json` inside each individual run records the latest phase, PID, configuration, and current/peak allocator counters. A single `nvidia-smi` screenshot does not identify the recipe or establish sustained utilization. The memory ceiling does not force memory allocation.
+Every training job prints a `[run]` line containing its PID, actual batch sizes, precision, workers, and run directory. Each `[epoch]` summary prints accuracy, loss, LR, images/second, peak reserved VRAM, and elapsed/remaining time. `training_log.jsonl` records time waiting for data (including worker startup/teardown), step-and-host time, validation time, and checkpoint time. Step-and-host time includes transfers and Python work; it is not a CUDA-kernel-only measurement. `runtime_status.json` inside each individual run records the latest phase, PID, configuration, and current/peak allocator counters. A single `nvidia-smi` screenshot does not identify the recipe or establish sustained utilization. The memory ceiling does not force memory allocation.
 
 `progress.json` and console output include elapsed time, remaining time, expected finish time, run/epoch counts, and per-dataset timing coverage. Preflight supplies provisional rates; completed epochs replace them with observed rates. No fixed 5090 completion time is claimed before measurement. Final evaluation starts only after all requested training jobs are complete.
 

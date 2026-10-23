@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass, field, fields, replace
 from pathlib import Path
 
 from .config import Config
+from .display import add_display_arguments
 
 DATASETS = ("cifar100", "tiny_imagenet")
 TRAINING_FIELDS = {item.name for item in fields(Config)} - {
@@ -165,6 +166,7 @@ def add_cue_arguments(parser, root):
     parser.add_argument("--device", choices=("cuda", "cpu"))
     parser.add_argument("--debug", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--dry-run", action="store_true")
+    add_display_arguments(parser)
 
 
 def add_erm_arguments(parser, root):

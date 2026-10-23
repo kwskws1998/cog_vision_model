@@ -4,3 +4,4 @@ numpy==2.0.2
 Pillow==11.3.0
 gdown==5.2.0
 filelock==3.19.1
+tqdm==4.70.1

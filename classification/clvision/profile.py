@@ -14,6 +14,7 @@ from cue_routing.io import atomic_json, canonical_hash, environment, seed_everyt
 
 from .config import MAIN_METHODS, MECHANISM_METHODS
 from .data import make_loader
+from .display import BatchProgress
 from .engine import evaluate_loader, make_model, optimize_batch, optimizer_for
 from .identity import source_hash
 
@@ -72,6 +73,9 @@ def profile_method(manifest, config, steps, activity):
     loader_began = time.monotonic()
     loader = make_loader(manifest, config, "train", epoch=1)
     with ExitStack() as stack:
+        progress = stack.enter_context(
+            BatchProgress(f"Preflight {config.dataset}/{config.method}", steps)
+        )
         iterator = stack.enter_context(profile_iterator(loader))
         for index in range(steps):
             if index == warmup_steps:
@@ -101,6 +105,7 @@ def profile_method(manifest, config, steps, activity):
                 config,
             )
             activity["accepted_optimizer_steps"] = index + 1
+            progress.update(index + 1, stage="warmup" if index < warmup_steps else "measured")
             if index >= warmup_steps:
                 measured_images += len(images)
         torch.cuda.synchronize()

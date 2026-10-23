@@ -40,9 +40,14 @@ def build_parser():
 def main():
     """Enforce Conda and stop the entire stage after any unsuccessful subprocess."""
     from clvision.arguments import load_study_arguments, study_argument_tokens, study_preview
+    from clvision.display import options_from_arguments
 
     parser = build_parser()
     arguments = parser.parse_args()
+    try:
+        options_from_arguments(arguments)
+    except ValueError as error:
+        parser.error(str(error))
     if not (Path(sys.prefix) / "conda-meta/history").is_file():
         parser.error("Use conda run --prefix ./.conda python classification/run.py ...")
     if arguments.stage in ("cue", "erm", "ablation"):

@@ -33,6 +33,7 @@ from .data import (
     prepare_dominoes,
     prepare_tiny,
 )
+from .display import display_options, options_from_arguments
 from .engine import make_model, optimize_batch, optimizer_for
 from .identity import source_hash
 from .profile import profile_dataset
@@ -259,6 +260,10 @@ def main(root):
             command.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
             command.add_argument("--steps", type=int, default=1)
     arguments = parser.parse_args()
+    try:
+        display = options_from_arguments(arguments)
+    except ValueError as error:
+        parser.error(str(error))
     if arguments.command in ("cue", "erm", "ablation"):
         try:
             settings = (
@@ -275,7 +280,8 @@ def main(root):
             return
         torch.set_num_threads(4)
         runner = run_ablation if arguments.command == "ablation" else run_cue_study
-        runner(root, arguments.data_root, arguments.runs_dir, settings)
+        with display_options(display):
+            runner(root, arguments.data_root, arguments.runs_dir, settings)
         print(
             f"{arguments.command} results: {arguments.runs_dir.resolve() / 'comparison.md'}",
             flush=True,
@@ -304,7 +310,8 @@ def main(root):
         value = smoke(root)
     elif arguments.command == "study":
         print(json.dumps(study_preview(settings), indent=2), flush=True)
-        result = run_study(root, arguments.data_root, arguments.runs_dir, settings=settings)
+        with display_options(display):
+            result = run_study(root, arguments.data_root, arguments.runs_dir, settings=settings)
         value = {
             "status": "complete",
             "benchmark_evidence": result["benchmark_evidence"],
@@ -323,12 +330,13 @@ def main(root):
             value = data_smoke(root, manifest, arguments.device, arguments.steps)
         else:
             base = base_recipe(arguments.dataset, settings)
-            value = profile_dataset(
-                root,
-                manifest,
-                base,
-                root / "classification/verification" / f"{arguments.dataset}_cuda.json",
-            )
+            with display_options(display):
+                value = profile_dataset(
+                    root,
+                    manifest,
+                    base,
+                    root / "classification/verification" / f"{arguments.dataset}_cuda.json",
+                )
             if not value["measured"]:
                 print(json.dumps(value, indent=2))
                 raise SystemExit(2)
