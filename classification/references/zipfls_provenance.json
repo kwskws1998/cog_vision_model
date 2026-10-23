@@ -1,0 +1,42 @@
+{
+  "revision": "108e27aaf81aee0dc6dcd965ed6389f2ea06ba10",
+  "repository": "https://github.com/megvii-research/zipfls",
+  "files": [
+    {
+      "path": "LICENSE",
+      "url": "https://raw.githubusercontent.com/megvii-research/zipfls/108e27aaf81aee0dc6dcd965ed6389f2ea06ba10/LICENSE",
+      "file": "classification/references/zipfls/LICENSE.txt",
+      "sha256": "9cedf8b0b7cdce449796449b6228ace7b75b5cf3e60bf785ecfaa2000a62503f"
+    },
+    {
+      "path": "pytorch_zipfls/train.py",
+      "url": "https://raw.githubusercontent.com/megvii-research/zipfls/108e27aaf81aee0dc6dcd965ed6389f2ea06ba10/pytorch_zipfls/train.py",
+      "file": "classification/references/zipfls/pytorch_zipfls__train.py.txt",
+      "sha256": "3ab25399f58cb1d8ff9e2405e74b95bc14e75e7daaac3d35150466c85c2b1af7"
+    },
+    {
+      "path": "pytorch_zipfls/losses.py",
+      "url": "https://raw.githubusercontent.com/megvii-research/zipfls/108e27aaf81aee0dc6dcd965ed6389f2ea06ba10/pytorch_zipfls/losses.py",
+      "file": "classification/references/zipfls/pytorch_zipfls__losses.py.txt",
+      "sha256": "65322cbe08237ed1662c56d57ce244ab34aaf168b1f9aa45a33cee8c6e3cc91a"
+    },
+    {
+      "path": "pytorch_zipfls/zipf_utils.py",
+      "url": "https://raw.githubusercontent.com/megvii-research/zipfls/108e27aaf81aee0dc6dcd965ed6389f2ea06ba10/pytorch_zipfls/zipf_utils.py",
+      "file": "classification/references/zipfls/pytorch_zipfls__zipf_utils.py.txt",
+      "sha256": "a9ddbb1105edc37356dc0cc8c0e45da0da699dac866a49420523e83af7a522c6"
+    },
+    {
+      "path": "pytorch_zipfls/cifar_models/resnet.py",
+      "url": "https://raw.githubusercontent.com/megvii-research/zipfls/108e27aaf81aee0dc6dcd965ed6389f2ea06ba10/pytorch_zipfls/cifar_models/resnet.py",
+      "file": "classification/references/zipfls/pytorch_zipfls__cifar_models__resnet.py.txt",
+      "sha256": "120b922bcba1a7a5e2106ff9f0d69b6a533950546fe8a37e6ede12abc855acf8"
+    },
+    {
+      "path": "pytorch_zipfls/README.md",
+      "url": "https://raw.githubusercontent.com/megvii-research/zipfls/108e27aaf81aee0dc6dcd965ed6389f2ea06ba10/pytorch_zipfls/README.md",
+      "file": "classification/references/zipfls/pytorch_zipfls__README.md.txt",
+      "sha256": "8a0f6c3e64719797fb29b147e16374a68bc63d228a9c2b9cb36d1dc71a16788d"
+    }
+  ]
+}

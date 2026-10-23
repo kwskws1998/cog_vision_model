@@ -1,0 +1,381 @@
+{
+  "schema": 1,
+  "date": "2026-10-23",
+  "status": "Implemented additive experiment code; runtime evidence is generated separately under classification/verification",
+  "research_question": "Does cue-specific detached weighting of global-to-local self-distillation improve classification over a strong CE baseline, fixed consistency, and an external spatial self-distillation method?",
+  "current_state": {
+    "repository_commit": "6b44039767a26f797cf72f573775763be87bb3c4",
+    "shared_core_source_sha256": "583fc84119e4d5ff16b323e91d446f394bd824eb1f400a94ee8bfdadff9ad4e2",
+    "officehome_source_sha256": "273d238783d9b723e0e74604bad856b3209e485d4af8b4115aab5c82698bb95b",
+    "uploaded_officehome_log": {
+      "tests_passed": 81,
+      "verified_images": 15588,
+      "optimizer_steps_per_method": 1,
+      "execution_device": "cpu",
+      "purpose": "real_OfficeHome_source_data_cpu_smoke",
+      "target_loader_accessed": false,
+      "gpu_benchmark_started_in_log": false
+    },
+    "completed_pacs_results_percent": {
+      "ERM": 81.93968256721085,
+      "CUE": 80.19613238684978,
+      "RSC": 79.8207981283715,
+      "interpretation": "Preserve this negative comparison with ERM. Do not relabel it as a successful general-purpose module."
+    }
+  },
+  "operator_audit": {
+    "gradient_equivalent_objective": "CE(z_joint,y) + sum_k area_k * (1-gamma_k) * KL(stopgrad(p_joint) || p_local_k)",
+    "conditions": [
+      "Joint logits are the area-weighted sum of cue logits.",
+      "Gates and the global distribution used as the KL teacher are detached.",
+      "Use the same temperature-one categorical probabilities as the current implementation."
+    ],
+    "interpretation": "The current update is an adaptive global-to-local self-distillation update. Equality is at the gradient level, not equality of the logged scalar losses.",
+    "numerical_probe": "cue_kd_equivalence_verification.json",
+    "novelty_boundary": "The unresolved claim concerns the particular per-cue weighting rule and its utility. Local supervision, shared spatial classifiers, consistency, and self-distillation are prior components. This search does not establish novelty.",
+    "inference": "Training-only regularization; inference remains GAP plus the final classifier. No test-time adaptive cue selection."
+  },
+  "primary_external_competitor": {
+    "name": "Zipf's Label Smoothing",
+    "venue_year": "ECCV 2022",
+    "paper": "https://www.ecva.net/papers/eccv_2022/papers_ECCV/papers/136710104.pdf",
+    "exact_excerpt": "We apply a shared-classifier on dense feature maps",
+    "excerpt_location": "Figure 3",
+    "official_repository": "https://github.com/megvii-research/zipfls",
+    "pinned_revision": "108e27aaf81aee0dc6dcd965ed6389f2ea06ba10",
+    "code_paths": [
+      "pytorch_zipfls/cifar_models/resnet.py",
+      "pytorch_zipfls/train.py",
+      "pytorch_zipfls/losses.py",
+      "pytorch_zipfls/README.md"
+    ],
+    "reason_selected": "Teacher-free spatial predictions regularize the same classifier's global output, with unchanged final inference. Official ResNet-18 single-GPU CIFAR-100 and Tiny ImageNet implementations exist.",
+    "variant": "Explicit dense2: final and penultimate spatial votes with the training-only penultimate linear classifier and auxiliary CE retained",
+    "fidelity_requirements": {
+      "deeplayer": 2,
+      "power": 1.0,
+      "distribution": "rank_zipf",
+      "upsample": "bilinear",
+      "correct_only_mask": false,
+      "rank_ties": "minimum rank, including tied zero-vote classes",
+      "target_class": "remove and renormalize the non-target distribution",
+      "dense_vote_target": "detached hard votes; no gradient through ranking",
+      "auxiliary_ce_weights": {
+        "cifar100": 0.1,
+        "tiny_imagenet": 0.5
+      }
+    },
+    "resource_comparison": "Same final inference model, but dense2 has an extra training-only linear head and auxiliary CE. Report its training parameters, throughput, and peak memory. Do not claim equal training parameter counts.",
+    "publication_boundary": "A relevant external comparator, not a claim about the strongest available 2026 method. The native-64px Tiny evaluation is a matched reevaluation, because the paper used resized 32px Tiny images."
+  },
+  "reviewed_alternatives": [
+    {
+      "name": "USKD",
+      "paper": "https://arxiv.org/abs/2303.13005",
+      "exact_excerpt": "USKD generates customized soft labels for both target and non-target classes without a teacher.",
+      "official_repository": "https://github.com/yzd-v/cls_KD",
+      "pinned_revision": "ad4876fa4c5c70db5d11b892278c4090086ce935",
+      "classification": "Related teacher-free classifier regularization; useful CNN/ViT precedent, but not the sole selected opponent for this spatial ResNet study.",
+      "implementation_boundary": "Uses an intermediate weak classifier. Official log-probability rank code and probability-based paper equation differ; neither should be silently substituted."
+    },
+    {
+      "name": "RSC",
+      "paper": "https://arxiv.org/abs/2007.02454",
+      "exact_excerpt": "improves the generalization of CNN to the out-of-domain data",
+      "classification": "Retain for the existing PACS/Office-Home domain-generalization experiments; not the new primary classification opponent."
+    },
+    {
+      "name": "Dense Classification and Implanting for Few-Shot Learning",
+      "paper": "https://arxiv.org/abs/1903.05050",
+      "exact_excerpt": "dense classification over feature maps",
+      "classification": "Component-level precedent for spatial local supervision; the entire few-shot task is not the selected standard-classification comparison."
+    }
+  ],
+  "main_arms": [
+    {
+      "id": "erm",
+      "loss": "Global hard-label cross entropy"
+    },
+    {
+      "id": "label_smoothing",
+      "loss": "Global CE with uniform label smoothing epsilon=0.1",
+      "role": "Standard regularization control, not an additional named research competitor"
+    },
+    {
+      "id": "fixed_global_local",
+      "loss": "Global CE plus a constant-lambda area-weighted global-to-local KL with detached global teacher",
+      "role": "Decisive matched mechanism control"
+    },
+    {
+      "id": "zipfls_dense2",
+      "loss": "Pinned official dense2 Zipf loss and auxiliary supervision"
+    },
+    {
+      "id": "cue",
+      "loss": "Existing detached per-cue disagreement rule, interpreted by its equivalent self-distillation gradient"
+    }
+  ],
+  "common_natural_image_recipe": {
+    "backbone": "ResNet-18 with a 3x3 stride-1 stem and no maxpool",
+    "pretraining": "none; identical random backbone and final-head initialization per paired seed",
+    "batchnorm": "train running statistics in every arm",
+    "cue_grid": [
+      2,
+      2
+    ],
+    "batch_size": 128,
+    "epochs": 200,
+    "optimizer": "SGD",
+    "momentum": 0.9,
+    "weight_decay": 0.0001,
+    "initial_learning_rate": 0.1,
+    "learning_rate_schedule": {
+      "milestone_epochs": [
+        100,
+        150
+      ],
+      "multiplier": 0.1
+    },
+    "precision": "FP16 encoder and FP32 probabilities, readouts, losses; measure on the target GPU first",
+    "final_checkpoint": "Epoch 200; no final-test-based checkpoint selection",
+    "paired_seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "data_matching": "Same sample order, augmentations, batches, update count, and split within each paired seed",
+    "augmentations": "Random padded crop plus horizontal flip; CIFAR padding4, Tiny padding8; identical per dataset across arms",
+    "advanced_augmentation": "No Mixup, CutMix, AutoAugment, or external teacher in this controlled first study",
+    "matrix_rule": "Complete the prespecified natural-image matrix before opening final clean or corruption scores",
+    "interpretation": "A matched controlled recipe, not a reproduction of published best scores or a 2026 SOTA claim"
+  },
+  "validation_only_development": {
+    "split_seed": 0,
+    "development_training_seed": 2027,
+    "checkpoint": "Final epoch200 validation score; top1 first, lower NLL then predefined candidate order for ties",
+    "budget": "Exactly three candidate runs per tunable method per natural dataset; no search on final test scores",
+    "cue": {
+      "gate_tau_candidates": [
+        0.05,
+        0.15,
+        0.3
+      ],
+      "gate_temperature": 0.05,
+      "joint_floor": 0.5
+    },
+    "fixed_global_local": {
+      "lambda_candidates": [
+        0.1,
+        0.25,
+        0.5
+      ]
+    },
+    "zipfls_dense2": {
+      "cifar_lambda_candidates": [
+        0.03,
+        0.1,
+        0.3
+      ],
+      "tiny_lambda_candidates": [
+        0.3,
+        1.0,
+        3.0
+      ]
+    },
+    "freeze": "Freeze the chosen configurations before final-seed training; preserve candidate scores and source fingerprints"
+  },
+  "selected_datasets": [
+    {
+      "id": "cifar100",
+      "role": "First main natural-image experiment",
+      "official_source": "https://cave.cs.toronto.edu/kriz/cifar.html",
+      "image_size": [
+        32,
+        32
+      ],
+      "classes": 100,
+      "actual_train_images": 45000,
+      "validation_images": 5000,
+      "sealed_test_images": 10000,
+      "split": "Fixed class-stratified50 validation images per class from the official train set; the other450 per class train. Hash and publish exact indices.",
+      "final_feature_map": [
+        4,
+        4
+      ],
+      "metrics": [
+        "clean top1 accuracy",
+        "NLL",
+        "ECE secondary",
+        "paired seed differences",
+        "peak reserved VRAM",
+        "training images per second",
+        "inference throughput"
+      ],
+      "main_training_runs": 25
+    },
+    {
+      "id": "cifar100_c",
+      "role": "Final robustness evaluation of exactly the same clean-trained CIFAR checkpoints; no new training",
+      "official_source": "https://zenodo.org/records/3555552",
+      "archive_md5": "11f0ed0f1191edbf9fa23466ae6021d3",
+      "severities": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "corruptions": [
+        "gaussian_noise",
+        "shot_noise",
+        "impulse_noise",
+        "defocus_blur",
+        "glass_blur",
+        "motion_blur",
+        "zoom_blur",
+        "snow",
+        "frost",
+        "fog",
+        "brightness",
+        "contrast",
+        "elastic_transform",
+        "pixelate",
+        "jpeg_compression"
+      ],
+      "additional_training_runs": 0,
+      "metric": "Mean corruption accuracy or raw mean error over15 corruptions x5 severities; per-corruption and per-severity tables",
+      "constraints": "Use the released bytes. No tuning, normalization adaptation, fine-tuning, or checkpoint selection on these test derivatives. Do not label the raw mean normalized mCE."
+    },
+    {
+      "id": "tiny_imagenet_200",
+      "role": "Second main natural-image experiment; more classes and spatial positions",
+      "official_archive": "http://cs231n.stanford.edu/tiny-imagenet-200.zip",
+      "image_size": [
+        64,
+        64
+      ],
+      "classes": 200,
+      "actual_train_images": 90000,
+      "internal_validation_images": 10000,
+      "sealed_official_validation_images": 10000,
+      "split": "Fixed class-stratified50 internal validation images per class from the official training set; train on the other450 per class. Official validation is the sealed final evaluation.",
+      "final_feature_map": [
+        8,
+        8
+      ],
+      "main_training_runs": 25,
+      "metric": "Clean top1, NLL, paired seed differences, and training/inference resource measurements",
+      "boundary": "Native64px matched reevaluation. Do not compare absolute results to Zipf's published32px scores as if conditions were identical."
+    },
+    {
+      "id": "mnist_cifar_cue_conflict",
+      "role": "Prespecified controlled cue-learning falsification experiment; not a new official dataset",
+      "source_paper": "https://proceedings.neurips.cc/paper/2020/file/6cfe0e6127fa25df2a0ef2ae1067d915-Paper.pdf",
+      "exact_excerpt": "neural networks can exclusively rely on the simplest feature",
+      "official_code": "https://github.com/harshays/simplicitybiaspitfalls",
+      "construction": "RGB-replicated zero-padded MNIST digit0/1 above a CIFAR-10 automobile/truck image; tensor3x64x32; label is always the vehicle class",
+      "train_vehicle_images": 9000,
+      "validation_vehicle_images": 1000,
+      "test_vehicle_images": 2000,
+      "component_isolation": "Split MNIST and vehicle component identities before pairing. Never reuse a train/validation component as a final-test component.",
+      "training_digit_agreement": 0.95,
+      "validation_digit_agreement": 0.95,
+      "sealed_test_digit_agreements": [
+        0.95,
+        0.5,
+        0.05
+      ],
+      "counterfactual_test": "Pair each held-out vehicle with both digit classes using only held-out MNIST identities; weight the fixed pairs to obtain all three agreement conditions",
+      "epochs": 50,
+      "batch_size": 128,
+      "optimizer": "SGD momentum0.9 weight_decay0.0001 lr0.1, decay0.1 at epochs25 and40",
+      "augmentation": "No crops that mix or remove the two cue panels",
+      "seeds": [
+        0,
+        1,
+        2
+      ],
+      "arms": [
+        "erm",
+        "fixed_global_local",
+        "cue",
+        "pure_marginal",
+        "image_mean_gate",
+        "permuted_gate"
+      ],
+      "short_training_runs": 18,
+      "hyperparameters": "Freeze gates and fixed-lambda from CIFAR validation; do not tune against the independent or reversed test regimes",
+      "metrics": [
+        "balanced accuracy at50% agreement",
+        "worst of four vehicle x digit group accuracies",
+        "accuracy at95% and5% agreement",
+        "prediction changes when only the digit changes",
+        "vehicle-only and digit-only diagnostic accuracy"
+      ],
+      "gate_controls": {
+        "image_mean_gate": "Replace each per-region gamma by its area-weighted per-image mean; preserves per-image total coefficient and removes cue specificity. This differs from the current legacy image mode's RMS-disagreement gate.",
+        "permuted_gate": "For row-major regions[TL,TR,BL,BR], use[2,3,0,1], a fixed cyclic shift2 that swaps every digit-panel gate with a vehicle-panel gate. Equal-area regions preserve the gate multiset and mean. This deliberately differs from the legacy source's shift1 diagnostic, and no permutation is selected from final results.",
+        "pure_marginal": "Gamma=0 endpoint; checks whether simple independent local supervision explains a gain."
+      },
+      "boundary": "The original MNIST-CIFAR experiment and this95%/50%/5% counterfactual protocol differ. This is a declared mechanism variant, not an author reproduction or an established benefit of CUE. Gate-disagreement correlations alone are tautological diagnostics, not causal evidence."
+    }
+  ],
+  "existing_experiments": {
+    "pacs": "Completed negative evidence preserved; do not rerun or discard merely because it loses to ERM",
+    "officehome": "Preparation passed. Keep its existing frozen36-run DG recipe as supplementary evidence; it is not the primary test of generic classification.",
+    "new_suite_gpu_priority": "CIFAR validation-only development first; freeze its selected settings; run the mechanism experiment; complete the natural-image matrices including Tiny development; only then open natural final tests. OfficeHome is supplementary and must never overlap another training process on the same GPU",
+    "mechanism_feedback_rule": "Mechanism final50%/5% results must not change the frozen gate, fixed-consistency coefficients, natural-image recipes, or selected datasets. Any later revision is a separately registered follow-up."
+  },
+  "claim_and_failure_rules": [
+    "An advantage over the external competitor does not establish an advantage over ERM, label smoothing, or fixed consistency; report every arm.",
+    "An adaptive-routing claim requires a repeatable gain over fixed consistency and support from cue-specific controls, not a positive CUE-minus-RSC number alone.",
+    "Report all five paired seeds, mean and SD, per-seed differences and confidence intervals. The two co-primary mechanism contrasts are CUE versus fixed consistency on CIFAR100 and TinyImageNet. If making formal significance claims for these, use a prespecified paired test and Holm correction across the two; five seeds still provide limited uncertainty evidence. Other comparisons are reported explicitly and do not imply SOTA.",
+    "A benchmark difference of at least0.5 percentage points can serve as a prespecified practical-effect threshold, separately from uncertainty; smaller gains are reported as such rather than hidden.",
+    "A corruption gain accompanied by worse clean accuracy is a tradeoff, not generic superiority.",
+    "A mechanism gain without natural-image replication supports only the controlled mechanism result.",
+    "If image-common or permuted gates match CUE, cue-specific assignment is unsupported.",
+    "If the independent/reversed cue regimes worsen, reject the shortcut-resistance interpretation.",
+    "If gates are nearly constant, discuss the method as approximately fixed regularization rather than demonstrated adaptive cognition.",
+    "No winning benchmark, seed, checkpoint, or corruption subset may be selected after viewing final scores."
+  ],
+  "resource_gate": {
+    "target": "One24GB RTX3090-class GPU",
+    "max_peak_reserved_gib": 20,
+    "must_measure": [
+      "All five methods",
+      "Full training batch128",
+      "All optimizer states",
+      "Full evaluation batch",
+      "At least10 real pretrained-free CUDA updates with finite FP32 losses",
+      "Wall-clock time and examples per second"
+    ],
+    "fallback": "If batch128 fails for any arm, stop before the matrix and amend the shared recipe for every arm. Never silently change one method's batch, precision, or resolution.",
+    "fit_measured": false,
+    "runtime_measured": false
+  },
+  "scope": {
+    "natural_main_runs": 50,
+    "validation_candidate_runs": 18,
+    "short_mechanism_runs": 18,
+    "corruption_training_runs": 0,
+    "execution": "Stage sequentially with development stopping before final-test access if implementation or resource gates fail; these are run counts, not an ETA.",
+    "vit": "Deferred from this first ResNet study. A ViT result requires a separate matched pooling/initialization/training protocol and a verified comparator adaptation; the current generic token interface is not such an experiment.",
+    "not_selected_this_round": [
+      "CUB-200 pretrained fine-tuning",
+      "Waterbirds",
+      "arbitrarily chosen ImageNet-100 subset",
+      "ImageNet-1K full training",
+      "TinyImageNet-C additional robustness grid"
+    ]
+  },
+  "implementation": {
+    "package": "classification/clvision",
+    "entry_point": "classification/experiment.py",
+    "driver": "classification/run.py",
+    "architecture_boundary": "Common torchvision post-activation ResNet18 with a small-image stem for all methods. The reference small-image Zipf code uses a pre-activation backbone, so this is a matched operator port, not its reported-score reproduction.",
+    "classification_runner": "registered fifty-run natural comparison plus eighteen development trials and eighteen mechanism runs",
+    "final_test_policy": "All main and mechanism training precedes every final evaluation, including mechanism tests."
+  }
+}

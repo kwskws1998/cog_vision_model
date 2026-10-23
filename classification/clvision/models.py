@@ -1,0 +1,82 @@
+"""Common small-image ResNet-18 and the complete two-stage spatial Zipf readout."""
+
+import torch
+from torch import nn
+from torch.nn import functional as F
+from torchvision.models import resnet18
+
+from cue_routing.io import state_hash
+from cue_routing.models import CueReadout
+
+
+class SmallResNet18(nn.Module):
+    """Share the backbone and inference head; only Zipf adds a train-time auxiliary head."""
+
+    def __init__(self, classes, auxiliary=False, seed=0):
+        super().__init__()
+        network = resnet18(weights=None, num_classes=classes)
+        network.conv1 = nn.Conv2d(3, 64, 3, stride=1, padding=1, bias=False)
+        nn.init.kaiming_normal_(network.conv1.weight, mode="fan_out", nonlinearity="relu")
+        network.maxpool = nn.Identity()
+        self.backbone = nn.Sequential(
+            network.conv1,
+            network.bn1,
+            network.relu,
+            network.maxpool,
+            network.layer1,
+            network.layer2,
+            network.layer3,
+            network.layer4,
+        )
+        self.readout = CueReadout(512, classes, grid_size=2)
+        self.readout.classifier = network.fc
+        self.auxiliary = None
+        if auxiliary:
+            with torch.random.fork_rng(devices=[]):
+                torch.set_rng_state(torch.Generator().manual_seed(seed + 32017).get_state())
+                self.auxiliary = nn.Linear(256, classes)
+
+    def feature_maps(self, images):
+        """Expose the penultimate and final spatial maps without extra encoder passes."""
+        values = images
+        penultimate = None
+        for index, layer in enumerate(self.backbone):
+            values = layer(values)
+            if index == 6:
+                penultimate = values
+        return penultimate, values
+
+    def shared_state_hash(self):
+        """Compare exactly the tensors shared by every method, excluding auxiliary parameters."""
+        return state_hash(
+            {
+                key: value
+                for key, value in self.state_dict().items()
+                if not key.startswith("auxiliary.")
+            }
+        )
+
+    def forward(self, images):
+        """Use identical global-average final-head predictions for all inference."""
+        _, final = self.feature_maps(images)
+        return self.readout(final)
+
+    def zipf_predictions(self, penultimate, final):
+        """Retain dense2 votes and auxiliary CE; bilinear upsampling matches the reference."""
+        if self.auxiliary is None:
+            raise ValueError("Zipf dense2 requires its auxiliary classifier")
+        with torch.autocast(device_type=final.device.type, enabled=False):
+            global_logits = self.readout.classifier(final.float().mean((2, 3)))
+            auxiliary_logits = self.auxiliary(penultimate.float().mean((2, 3)))
+            votes = []
+            with torch.no_grad():
+                for features, classifier in (
+                    (final, self.readout.classifier),
+                    (penultimate, self.auxiliary),
+                ):
+                    enlarged = F.interpolate(
+                        features.float(), scale_factor=2.0, mode="bilinear", align_corners=False
+                    )
+                    local_logits = classifier(enlarged.permute(0, 2, 3, 1))
+                    votes.append(local_logits.argmax(-1).flatten(1))
+            return global_logits, auxiliary_logits, torch.cat(votes, dim=1)
