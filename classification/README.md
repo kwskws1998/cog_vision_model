@@ -14,6 +14,8 @@ admission. Final tests are sealed until selection closes. The selected checkpoin
 is reused without a second training run. This dedicated preset opts into MSRA
 convolution initialization and author normalization; ordinary study defaults remain
 unchanged. Its held-out split is explicitly not an exact published-score reproduction.
+All CUE candidates are preflighted before long training; CUE tuning runs first,
+followed by the fixed ERM baseline. Each candidate admission reserves time for ERM.
 
 ## Select PostAct or PreAct
 

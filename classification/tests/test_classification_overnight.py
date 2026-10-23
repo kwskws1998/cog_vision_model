@@ -16,7 +16,12 @@ from clvision.config import Config, learning_rate_for_epoch
 from clvision.display import DisplayOptions, display_options
 from clvision.engine import make_model
 from clvision.overnight_settings import deadline_time, validate_settings
-from clvision.overnight_workflow import admit_candidate, run_overnight, split_audit
+from clvision.overnight_workflow import (
+    admit_candidate,
+    preflight_search,
+    run_overnight,
+    split_audit,
+)
 
 from cue_routing.io import atomic_json, file_hash, read_json, seed_everything, state_hash
 
@@ -153,6 +158,19 @@ class OvernightTests(unittest.TestCase):
         data.make_fixture(data_root)
         original = data.read_array
         test_reads = []
+        from clvision.overnight_workflow import train as actual_train
+
+        training_order = []
+
+        def ordered_train(config, manifest, run_dir, root, **kwargs):
+            """Assert real CUE training completes and selection freezes before any ERM training."""
+            training_order.append(config.method)
+            if config.method == "cue":
+                self.assertFalse((directory / "main/seed0_erm").exists())
+            else:
+                self.assertTrue((directory / "selection.json").exists())
+                self.assertEqual(len(list((directory / "development").rglob("completion.json"))), 2)
+            return actual_train(config, manifest, run_dir, root, **kwargs)
 
         def guarded(root, descriptor):
             """Require the complete search, frozen winner and training seal before test data loading."""
@@ -164,10 +182,14 @@ class OvernightTests(unittest.TestCase):
                 test_reads.append(descriptor["path"])
             return original(root, descriptor)
 
-        with patch("clvision.data.read_array", side_effect=guarded):
+        with (
+            patch("clvision.data.read_array", side_effect=guarded),
+            patch("clvision.overnight_workflow.train", side_effect=ordered_train),
+        ):
             result = run_overnight(
                 ROOT, data_root, directory, settings, "2099-01-01T10:30:00+09:00"
             )
+            self.assertEqual(training_order, ["cue", "cue", "erm"])
             before = {str(p): file_hash(p) for p in directory.rglob("completion.json")}
             again = run_overnight(
                 ROOT, data_root, directory, settings, "2099-01-01T10:30:00+09:00", resume=True
@@ -201,7 +223,9 @@ class OvernightTests(unittest.TestCase):
         """Force timing admission to accept only the first CUE candidate and close the rest."""
         data_root, directory = self.folder / "data", self.folder / "study"
         data.make_fixture(data_root)
-        with patch("clvision.overnight_workflow.admit_candidate", side_effect=[True, True, False]):
+        with patch(
+            "clvision.overnight_workflow.admit_candidate", side_effect=[True, True, False]
+        ) as admission:
             result = run_overnight(
                 ROOT, data_root, directory, self.debug_settings(), "2099-01-01T10:30:00+09:00"
             )
@@ -209,6 +233,80 @@ class OvernightTests(unittest.TestCase):
         self.assertEqual(result["selection"]["search"]["decisions"][1]["action"], "skip_budget")
         self.assertFalse((directory / "development/cue1").exists())
         self.assertEqual(len(list(directory.rglob("test_access.json"))), 2)
+        for decision, call in zip(
+            result["selection"]["search"]["decisions"], admission.call_args_list[1:]
+        ):
+            self.assertGreater(decision["reserved_erm_seconds"], 0)
+            self.assertAlmostEqual(
+                call.args[2], decision["estimated_seconds"] + decision["reserved_erm_seconds"]
+            )
+
+    def test_every_exact_cue_candidate_is_preflighted_before_erm(self):
+        """Check all candidate-specific configs reach CUDA profiling before the ERM measurement."""
+        base, candidates = validate_settings(self.preset)
+        calls = []
+
+        def profiler(root, manifest, config, destination, methods):
+            """Return only the measured identities needed to exercise scheduling without CUDA."""
+            calls.append((config, destination, methods))
+            return {
+                "active": {"config": config.to_dict()},
+                "methods": {
+                    config.method: {
+                        "initial_shared_model_sha256": "same-initial-weights",
+                        "first_augmented_batch_sha256": "same-training-batch",
+                    }
+                },
+            }
+
+        with (
+            patch("clvision.overnight_workflow.profile_dataset", side_effect=profiler),
+            patch("clvision.overnight_workflow.verify_profile") as verify,
+        ):
+            erm, cues = preflight_search(ROOT, self.folder, {}, base, candidates)
+        self.assertEqual([row[0] for row in calls], candidates + [base])
+        self.assertEqual([row[2] for row in calls], [("cue",)] * len(candidates) + [("erm",)])
+        self.assertEqual(verify.call_count, len(candidates) + 1)
+        self.assertEqual(len(cues), len(candidates))
+        self.assertIn("erm", erm["methods"])
+        cached_path = self.folder / "preflight/cue0.json"
+        atomic_json(cached_path, cues[1])
+        with (
+            patch("clvision.overnight_workflow.profile_dataset") as unused,
+            patch("clvision.overnight_workflow.verify_profile"),
+            self.assertRaisesRegex(ValueError, "exact registered candidate config"),
+        ):
+            preflight_search(ROOT, self.folder, {}, base, candidates)
+        unused.assert_not_called()
+        cached_path.unlink()
+        with (
+            patch(
+                "clvision.overnight_workflow.profile_dataset",
+                side_effect=[cues[0], RuntimeError("candidate1 failed")],
+            ) as failed,
+            patch("clvision.overnight_workflow.verify_profile"),
+            self.assertRaisesRegex(RuntimeError, "candidate1 failed"),
+        ):
+            preflight_search(ROOT, self.folder, {}, base, candidates)
+        self.assertEqual([call.args[2].method for call in failed.call_args_list], ["cue", "cue"])
+
+    def test_failed_candidate_preflight_prevents_all_long_training_and_testing(self):
+        """A candidate failure must surface before spending hours on either full training arm."""
+        data_root, directory = self.folder / "data", self.folder / "study"
+        data.make_fixture(data_root)
+        with (
+            patch(
+                "clvision.overnight_workflow.preflight_search",
+                side_effect=RuntimeError("candidate preflight failed"),
+            ),
+            patch("clvision.overnight_workflow.train") as training,
+            self.assertRaisesRegex(RuntimeError, "candidate preflight failed"),
+        ):
+            run_overnight(
+                ROOT, data_root, directory, self.debug_settings(), "2099-01-01T10:30:00+09:00"
+            )
+        training.assert_not_called()
+        self.assertFalse(list(directory.rglob("test_access.json")))
 
     def test_insufficient_initial_budget_never_trains_or_tests(self):
         """An expired or too-small budget must not launch a long baseline anyway."""

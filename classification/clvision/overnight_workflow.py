@@ -111,6 +111,38 @@ def admit_candidate(now, deadline, estimate, reserve_minutes, factor):
     return now + estimate * factor + reserve_minutes * 60 <= deadline
 
 
+def preflight_search(root, directory, manifest, config, candidates):
+    """Exercise every exact CUE candidate before any long run, then measure the ERM reserve."""
+    if config.debug:
+        return None, [None] * len(candidates)
+    profiles = []
+    jobs = [(f"cue{index}", candidate) for index, candidate in enumerate(candidates)]
+    jobs.append(("erm", config))
+    for name, recipe in jobs:
+        path = directory / "preflight" / f"{name}.json"
+        write(
+            f"[preflight-check] {name} method={recipe.method} tau={recipe.gate_tau} temperature={recipe.gate_temperature} floor={recipe.joint_floor} train/validation_only=True"
+        )
+        if path.exists():
+            profile = read_json(path)
+        else:
+            profile = profile_dataset(root, manifest, recipe, path, methods=(recipe.method,))
+        verify_profile(profile, root, manifest, recipe, methods=(recipe.method,))
+        if profile.get("active", {}).get("config") != recipe.to_dict():
+            raise ValueError(f"Preflight {name} differs from the exact registered candidate config")
+        profiles.append(profile)
+    measurements = [
+        profile["methods"][recipe.method] for profile, (_, recipe) in zip(profiles, jobs)
+    ]
+    for key in ("initial_shared_model_sha256", "first_augmented_batch_sha256"):
+        if len({row[key] for row in measurements}) != 1:
+            raise ValueError("CUE candidate and ERM preflights are not matched")
+    write(
+        f"[preflight-check] passed cue_candidates={len(candidates)} erm=1; starting CUE tuning first"
+    )
+    return profiles[-1], profiles[:-1]
+
+
 def collect_candidates(root, directory, manifest, configs, decisions, plan_id):
     """Reconstruct selection from complete, untouched validation-only trials in registered order."""
     rows = []
@@ -177,7 +209,7 @@ def promote_winner(root, source, destination, config, manifest, selection_id):
 
 
 def run_overnight(root, data_root, directory, settings, finish_by, resume=False):
-    """Complete ERM and as many full CUE trials as fit, freeze selection, then open test twice."""
+    """Tune CUE first while reserving ERM time, freeze selection, train ERM, then open test twice."""
     root, data_root, directory = map(lambda p: Path(p).resolve(), (root, data_root, directory))
     config, candidates = validate_settings(settings)
     deadline = deadline_time(finish_by)
@@ -220,25 +252,20 @@ def run_overnight(root, data_root, directory, settings, finish_by, resume=False)
         )
         if journal["plan_sha256"] != plan_id or len(journal["decisions"]) > len(candidates):
             raise ValueError("Search journal differs from registered plan")
-        profile = None
         if not selection_path.exists():
             seed_everything(config.seed, config.device)
-            profile_path = directory / "preflight.json"
-            if not config.debug:
-                if profile_path.exists():
-                    profile = read_json(profile_path)
-                    verify_profile(profile, root, manifest, config, methods=("erm", "cue"))
-                else:
-                    profile = profile_dataset(
-                        root, manifest, config, profile_path, methods=("erm", "cue")
-                    )
-                    verify_profile(profile, root, manifest, config, methods=("erm", "cue"))
-            erm_est = estimated_run_seconds(config, manifest, profile, "erm")
-            cue_est = estimated_run_seconds(config, manifest, profile, "cue")
-            if not baseline.exists() and not admit_candidate(
+            erm_profile, cue_profiles = preflight_search(
+                root, directory, manifest, config, candidates
+            )
+            erm_est = estimated_run_seconds(config, manifest, erm_profile, "erm")
+            cue_estimates = [
+                estimated_run_seconds(candidate, manifest, profile, "cue")
+                for candidate, profile in zip(candidates, cue_profiles)
+            ]
+            if not journal["decisions"] and not admit_candidate(
                 time.time(),
                 deadline,
-                erm_est + cue_est,
+                erm_est + cue_estimates[0],
                 settings["reserve_minutes"],
                 settings["time_safety_factor"],
             ):
@@ -246,18 +273,17 @@ def run_overnight(root, data_root, directory, settings, finish_by, resume=False)
                     "Estimated time cannot fit ERM plus one full CUE trial before the deadline; no training or test started"
                 )
             with DeadlineProgress(directory, deadline, config.epochs):
-                summary = train(
-                    config, manifest, baseline, root, selection_id=plan_id, resume=baseline.exists()
-                )
-                estimate = summary["elapsed_seconds"] * max(1, cue_est / max(erm_est, 1e-9))
+                slowdown = 1.0
                 for index, candidate in enumerate(candidates):
+                    estimate = cue_estimates[index] * slowdown
+                    erm_reserve = erm_est * slowdown
                     folder = directory / "development" / f"cue{index}"
                     if index >= len(journal["decisions"]):
                         now = time.time()
                         admitted = admit_candidate(
                             now,
                             deadline,
-                            estimate,
+                            estimate + erm_reserve,
                             settings["reserve_minutes"],
                             settings["time_safety_factor"],
                         )
@@ -267,6 +293,7 @@ def run_overnight(root, data_root, directory, settings, finish_by, resume=False)
                                 "action": "run" if admitted else "skip_budget",
                                 "decided_at": now,
                                 "estimated_seconds": estimate,
+                                "reserved_erm_seconds": erm_reserve,
                             }
                         )
                         atomic_json(journal_path, journal)
@@ -274,7 +301,7 @@ def run_overnight(root, data_root, directory, settings, finish_by, resume=False)
                     if decision["index"] != index:
                         raise ValueError("Candidate order changed")
                     write(
-                        f"[search] candidate={index + 1}/{len(candidates)} action={decision['action']} tau={candidate.gate_tau} floor={candidate.joint_floor} estimated={duration(estimate)} deadline_remaining={duration(deadline - time.time())}"
+                        f"[search] candidate={index + 1}/{len(candidates)} action={decision['action']} tau={candidate.gate_tau} floor={candidate.joint_floor} estimated={duration(estimate)} erm_reserved={duration(erm_reserve)} deadline_remaining={duration(deadline - time.time())}"
                     )
                     if decision["action"] == "skip_budget":
                         continue
@@ -289,7 +316,9 @@ def run_overnight(root, data_root, directory, settings, finish_by, resume=False)
                         selection_id=plan_id,
                         resume=folder.exists(),
                     )
-                    estimate = max(estimate, result["elapsed_seconds"])
+                    slowdown = max(
+                        slowdown, result["elapsed_seconds"] / max(cue_estimates[index], 1e-9)
+                    )
         rows = collect_candidates(
             root, directory, manifest, candidates, journal["decisions"], plan_id
         )
@@ -318,6 +347,11 @@ def run_overnight(root, data_root, directory, settings, finish_by, resume=False)
             manifest,
             selection_id,
         )
+        write(
+            f"[selection] CUE={chosen['name']} frozen by validation; starting ERM baseline; test=sealed"
+        )
+        with DeadlineProgress(directory, deadline, config.epochs):
+            train(config, manifest, baseline, root, selection_id=plan_id, resume=baseline.exists())
         specs = [
             (baseline, config, plan_id, "main"),
             (selected, selected_config, selection_id, "main"),

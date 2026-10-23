@@ -1,4 +1,4 @@
-"""Run one CIFAR-100 PreAct ERM baseline and time-bounded validation-only CUE tuning."""
+"""Tune CUE first, then train one matched CIFAR-100 PreAct ERM baseline before final testing."""
 
 import argparse
 import json

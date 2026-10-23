@@ -5,6 +5,10 @@ candidate. It never launches a second development seed, another dataset, a learn
 rate search, or corruption evaluations. It reuses the selected CUE checkpoint rather
 than training it again.
 
+The order is: all CUE candidate preflights, short ERM preflight, full CUE tuning,
+validation selection, full ERM training, then final test evaluation of both models.
+CUE tuning always precedes the full ERM run.
+
 ## Data boundaries
 
 | Partition | Source | Count | Permitted use |
@@ -85,12 +89,21 @@ the JSON preset can also specify any finite ordered list of CUE-only parameter
 triples. All candidates use the same single training seed. Hyperparameter trials
 are distinct training jobs, not additional seeds.
 
-CUDA preflight measures ERM and CUE on train/validation only. Before launching ERM,
-the runner requires an estimate that fits ERM plus at least one CUE candidate.
-After ERM, measured whole-run time and the profiled CUE/ERM ratio estimate each
-candidate. Completed CUE times can increase this estimate. Admission reserves
+CUDA preflight checks **every registered CUE parameter combination first**, using
+10 accepted GPU updates and validation batches for each, then checks ERM briefly.
+An error in any candidate aborts before any full CUE or ERM training. This checks
+forward/backward, numerical validity, optimizer updates, validation and memory fit;
+it cannot guarantee that no later-epoch failure will occur. Each candidate profile
+is stored separately under `preflight/`, with its exact config and source identity.
+
+Before starting the first CUE run, the runner requires an estimate that fits that
+candidate **plus the full ERM run**. Every subsequent candidate admission also
+reserves the full ERM estimate. Candidate-specific preflight rates estimate time;
+completed CUE runs calibrate a conservative slowdown factor applied to both future
+candidate estimates and the reserved ERM estimate. Admission additionally reserves
 20 minutes and applies a 1.25 safety factor. A candidate predicted to exceed the
-deadline is recorded as `skip_budget`; its 200 epochs are never shortened.
+deadline is recorded as `skip_budget`; its 200 epochs are never shortened. Once
+search selection is frozen, ERM runs once at its unchanged fixed recipe.
 
 An admitted job completes its full schedule. The deadline is a conservative
 estimate, not a hard kill or guaranteed completion time: sudden GPU slowdown can
@@ -104,6 +117,8 @@ an exhaustive search or evidence of the globally best CUE parameters.
 Stop the old run with Ctrl+C before pulling. Existing Conda dependencies suffice;
 there is no ZIP and no environment rebuild. Old run checkpoints cannot be resumed
 under changed source. Use a fresh run name for this experiment.
+The CUE-first update also changes source/plan identity: a run created by the older
+ERM-first version needs a new run directory, not `--resume` with the updated code.
 
 ```bash
 (
