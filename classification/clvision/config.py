@@ -39,6 +39,7 @@ class Config:
     """Validate every public setting before creating a run or a data loader."""
 
     dataset: str = "cifar100"
+    tiny_imagenet_size: int = 64
     method: str = "cue"
     seed: int = 0
     epochs: int = 200
@@ -71,6 +72,8 @@ class Config:
         """Reject unsafe numeric or device combinations before a recipe is frozen."""
         if self.dataset not in DATASETS or self.method not in set(MAIN_METHODS + MECHANISM_METHODS):
             raise ValueError("Unknown dataset or comparison method")
+        if type(self.tiny_imagenet_size) is not int or self.tiny_imagenet_size not in (32, 64):
+            raise ValueError("tiny_imagenet_size must be 32 or 64")
         for key in (
             "seed",
             "epochs",
@@ -143,6 +146,13 @@ class Config:
         if self.debug_max_batches and not self.debug:
             raise ValueError("Reduced training requires explicit debug=true")
         return self
+
+    @property
+    def input_shape(self):
+        """Resolve model input dimensions separately from the immutable source image dimensions."""
+        if self.dataset == "tiny_imagenet":
+            return (self.tiny_imagenet_size, self.tiny_imagenet_size)
+        return DATASETS[self.dataset][1:]
 
     def to_dict(self):
         """Use portable JSON types in all contracts."""

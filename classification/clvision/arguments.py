@@ -5,6 +5,7 @@ from pathlib import Path
 from .settings import StudySettings
 
 TRAINING_FIELDS = {
+    "tiny_imagenet_size": int,
     "batch_size": int,
     "eval_batch_size": int,
     "learning_rate": float,

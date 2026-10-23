@@ -2,7 +2,7 @@
 
 import argparse
 import json
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import asdict, dataclass, field, fields, replace
 from pathlib import Path
 
 from .config import Config
@@ -117,8 +117,22 @@ class CueSettings:
             "fixed_hyperparameters": True,
             "benchmark_evidence": not self.debug,
             "resolved_recipes": recipes,
+            "input_shapes": {name: list(self.recipe(name).input_shape) for name in self.datasets},
             "reference_comparison": "published_scores_with_explicit_protocol_differences",
         }
+
+
+@dataclass(frozen=True)
+class ErmSettings(CueSettings):
+    """Run only the plain ResNet cross-entropy control at the declared fixed recipe."""
+
+    def recipe(self, dataset, seed=None):
+        """Share all CUE inputs while changing only the training objective."""
+        return replace(super().recipe(dataset, seed), method="erm").validate()
+
+    def preview(self):
+        """Expose the ERM-only budget without scheduling CUE, searches, or corruptions."""
+        return {**super().preview(), "mode": "erm_only", "methods": ["erm"]}
 
 
 def add_cue_arguments(parser, root):
@@ -130,6 +144,7 @@ def add_cue_arguments(parser, root):
     parser.add_argument("--runs-dir", type=Path, default=root / "runs/cue_5090")
     parser.add_argument("--datasets", choices=DATASETS, nargs="+")
     parser.add_argument("--seeds", type=int, nargs="+")
+    parser.add_argument("--tiny-imagenet-size", type=int, choices=(32, 64))
     for name in ("epochs", "batch_size", "eval_batch_size", "workers", "warmup_epochs"):
         parser.add_argument("--" + name.replace("_", "-"), type=int)
     parser.add_argument("--milestones", type=int, nargs="*")
@@ -150,6 +165,15 @@ def add_cue_arguments(parser, root):
     parser.add_argument("--device", choices=("cuda", "cpu"))
     parser.add_argument("--debug", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--dry-run", action="store_true")
+
+
+def add_erm_arguments(parser, root):
+    """Expose a separate baseline entrypoint with the same explicit training inputs."""
+    add_cue_arguments(parser, root)
+    parser.set_defaults(
+        config=root / "classification/configs/erm_5090.json",
+        runs_dir=root / "runs/erm_5090",
+    )
 
 
 def load_cue_arguments(arguments, settings_type=CueSettings):

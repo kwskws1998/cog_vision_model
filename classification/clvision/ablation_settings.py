@@ -95,6 +95,7 @@ class AblationSettings(CueSettings):
             "mode": "matched_ablation",
             "methods": list(self.methods),
             "datasets": list(self.datasets),
+            "input_shapes": {name: list(self.recipe(name).input_shape) for name in self.datasets},
             "development_seed": self.development_seed,
             "seeds": list(self.seeds),
             "development_runs": development,

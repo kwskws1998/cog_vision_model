@@ -24,6 +24,7 @@ def memory_signature(config):
         key: getattr(config, key)
         for key in (
             "dataset",
+            "tiny_imagenet_size",
             "method",
             "batch_size",
             "eval_batch_size",
@@ -177,6 +178,7 @@ def profile_dataset(root, manifest, base_config, destination, steps=10, methods=
         print(
             f"[preflight] {base_config.dataset} {method}: {steps} GPU updates "
             f"train_batch={base_config.batch_size} eval_batch={base_config.eval_batch_size} "
+            f"input={base_config.input_shape[0]}x{base_config.input_shape[1]} "
             f"train_precision={base_config.precision} eval_precision={base_config.eval_precision}",
             flush=True,
         )

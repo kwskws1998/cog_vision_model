@@ -37,6 +37,8 @@ conda run --no-capture-output --prefix ./.conda python experiment.py pretrained-
 conda run --no-capture-output --prefix ./.conda python experiment.py profile
 ```
 
+For the next fixed-recipe classification controls, use [ERM-only first, then matched Tiny ImageNet 32px ERM/CUE](classification/README.md#erm-first-then-tiny-imagenet-at-32px). These commands reuse prepared data and the existing Conda environment.
+
 For CIFAR/Tiny ImageNet classification, use the [matched ERM/CUE ablation and bounded tuning workflow](classification/README.md#matched-resnet-ablation-and-bounded-tuning), or the [fixed CUE-only RTX 5090 workflow](classification/README.md#cue-first-on-rtx-5090). Both include explicit seed and hyperparameter flags, a dry-run preview, timestamped logs, and resume instructions.
 
 `profile` measures **ERM, RSC, and cue routing separately**, with the full training batch and the evaluation batch of 64. It materializes Adam state, performs three warmup and three measured optimizer steps per arm, and records peak allocated/reserved memory and GPU properties in `verification/cuda_memory.json`. Validation is included in the memory peak. A passing report is required before describing the configuration as verified on a 24 GB device. It profiles artificial inputs of the correct shape, not classification quality. Other processes can still consume GPU memory; use an otherwise free GPU. No automatic batch reduction changes the experiment.

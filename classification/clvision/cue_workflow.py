@@ -1,4 +1,4 @@
-"""Train only CUE, seal the declared seeds, and compare measured scores with cited references."""
+"""Train one fixed method, seal the declared seeds, and report independently verified results."""
 
 import statistics
 import time
@@ -22,16 +22,17 @@ REFERENCE = "classification/references/published_classification.json"
 
 
 def make_cue_plan(root, manifests, settings):
-    """Register fixed CUE settings and only the requested natural-image jobs before training."""
+    """Register one fixed method and only the requested natural-image jobs before training."""
+    method = settings.recipe(settings.datasets[0]).method
     return {
         "schema": 1,
-        "mode": "cue_only",
+        "mode": f"{method}_only",
         "source_sha256": source_hash(root),
         "settings": settings.to_dict(),
         "resolved_recipes": {name: settings.recipe(name).to_dict() for name in settings.datasets},
         "dataset_ids": {name: manifests[name]["dataset_id"] for name in settings.datasets},
         "development_trials": {},
-        "main_methods": ["cue"],
+        "main_methods": [method],
         "main_seeds": list(settings.seeds),
         "mechanism_methods": [],
         "mechanism_seeds": [],
@@ -49,7 +50,10 @@ def cue_specs(directory, plan):
     selection_id = canonical_hash(plan)
     return [
         (
-            Path(directory) / "main" / dataset / f"seed{seed}_cue",
+            Path(directory)
+            / "main"
+            / dataset
+            / f"seed{seed}_{plan['resolved_recipes'][dataset]['method']}",
             Config.from_dict({**plan["resolved_recipes"][dataset], "seed": seed}),
             selection_id,
             "main",
@@ -61,7 +65,15 @@ def cue_specs(directory, plan):
 
 def seal_cue_study(directory, root, plan, specs, manifests):
     """Reject a substituted method, seed, path, or recipe before opening any final tests."""
-    if plan["source_sha256"] != source_hash(root) or specs != cue_specs(directory, plan):
+    methods = {value["method"] for value in plan["resolved_recipes"].values()}
+    if (
+        len(methods) != 1
+        or not methods <= {"erm", "cue"}
+        or plan["main_methods"] != sorted(methods)
+        or plan["mode"] != f"{next(iter(methods))}_only"
+        or plan["source_sha256"] != source_hash(root)
+        or specs != cue_specs(directory, plan)
+    ):
         raise ValueError("CUE run scope or source differs from the frozen plan")
     return seal_study(directory, root, plan, specs, manifests)
 
@@ -81,7 +93,7 @@ def verified_metrics(root, manifest, spec, seal):
     ):
         raise ValueError("Evaluation artifacts do not match the sealed CUE run")
     predictions = torch.load(run_dir / "test_predictions.pt", map_location="cpu", weights_only=True)
-    expected = ImageDataset(manifest, "test")
+    expected = ImageDataset(manifest, "test", tiny_imagenet_size=config.tiny_imagenet_size)
     labels = torch.tensor([expected.sample_target(index) for index in range(len(expected))])
     if (
         predictions["contract_hash"] != contract_hash
@@ -100,11 +112,12 @@ def cue_report(directory, root, plan, manifests, specs, seal):
     if seal != seal_cue_study(directory, root, plan, specs, manifests):
         raise ValueError("CUE study seal differs")
     references = read_json(Path(root) / REFERENCE)
+    method = plan["main_methods"][0]
     if file_hash(Path(root) / REFERENCE) != plan["published_reference_sha256"]:
         raise ValueError("Published reference file changed after registration")
     output = {
         "schema": 1,
-        "mode": "cue_only",
+        "mode": plan["mode"],
         "source_sha256": plan["source_sha256"],
         "study_seal_sha256": canonical_hash(seal),
         "benchmark_evidence": plan["benchmark_evidence"],
@@ -114,7 +127,7 @@ def cue_report(directory, root, plan, manifests, specs, seal):
         "datasets": {},
     }
     lines = [
-        "# CUE measurements and published references",
+        f"# {method.upper()} measurements and published references",
         "",
         "Cross-protocol descriptive comparison; published scores were not reproduced locally.",
         "No paired significance or method-superiority claim follows from this table.",
@@ -140,14 +153,14 @@ def cue_report(directory, root, plan, manifests, specs, seal):
                 name: len(rows) for name, rows in manifests[dataset]["splits"].items()
             },
             "backbone": "torchvision post-activation small-image ResNet-18",
-            "input_size": 32 if dataset == "cifar100" else 64,
+            "input_size": selected[0][1].input_shape[0],
         }
         published = [row for row in references["scores"] if row["dataset"] == dataset]
         differences = (
             [
                 {
                     "method": row["method"],
-                    "cue_minus_reference_pp": measured["mean_accuracy_percent"]
+                    f"{method}_minus_reference_pp": measured["mean_accuracy_percent"]
                     - row["mean_accuracy_percent"],
                     "matched_protocol": False,
                 }
@@ -166,7 +179,7 @@ def cue_report(directory, root, plan, manifests, specs, seal):
             f"Our seed count is {len(scores)}; published mean/SD uses five seeds.",
         ]
         output["datasets"][dataset] = {
-            "cue_measured": measured,
+            f"{method}_measured": measured,
             "published_references": published,
             "descriptive_differences": differences,
             "protocol_notes": differences_note,
@@ -179,7 +192,7 @@ def cue_report(directory, root, plan, manifests, specs, seal):
             "",
             "| Method | Origin | Accuracy (%) | Seed SD (pp) | Seeds |",
             "|---|---|---:|---:|---:|",
-            f"| CUE | measured here | {measured['mean_accuracy_percent']:.2f} | {sd} | {len(scores)} |",
+            f"| {method.upper()} | measured here | {measured['mean_accuracy_percent']:.2f} | {sd} | {len(scores)} |",
         ]
         for row in published:
             lines.append(
@@ -197,7 +210,7 @@ def cue_report(directory, root, plan, manifests, specs, seal):
 
 
 def run_cue_study(root, data_root, directory, settings):
-    """Profile only CUE, train every registered seed, then evaluate final checkpoints and report."""
+    """Profile only the chosen method, train all registered seeds, then seal, evaluate, and report."""
     root, data_root, directory = Path(root), Path(data_root), Path(directory)
     started = time.monotonic()
     lock_path = root / ".cache/classification_device.lock"
@@ -216,11 +229,12 @@ def run_cue_study(root, data_root, directory, settings):
         if not settings.debug:
             for name in settings.datasets:
                 config = settings.recipe(name)
+                methods = (config.method,)
                 path = directory / "preflight" / f"{name}.json"
                 profiles[name] = profile_dataset(
-                    root, manifests[name], config, path, methods=("cue",)
+                    root, manifests[name], config, path, methods=methods
                 )
-                verify_profile(profiles[name], root, manifests[name], config, methods=("cue",))
+                verify_profile(profiles[name], root, manifests[name], config, methods=methods)
         specs = cue_specs(directory, plan)
         with StudyProgress(directory, plan, manifests, profiles, started):
             for run_dir, config, selection_id, phase in specs:

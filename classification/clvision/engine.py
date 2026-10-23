@@ -377,6 +377,7 @@ def train(
         status = runtime_status(run_dir, config, "training_start", start + 1)
         print(
             f"[run] pid={status['pid']} directory={run_dir.resolve()} "
+            f"input={config.input_shape[0]}x{config.input_shape[1]} "
             f"dataset={config.dataset} method={config.method} seed={config.seed} "
             f"train_batch={config.batch_size} eval_batch={config.eval_batch_size} "
             f"precision={config.precision}/{config.eval_precision} workers={config.workers} "

@@ -1,8 +1,113 @@
 # Controlled classification experiments
 
-This directory implements CIFAR-100, CIFAR-100-C, native-64px Tiny ImageNet-200, and the declared MNIST-CIFAR cue-conflict experiment. It shares the project environment and core operators with PACS and Office-Home. Each study records its own resolved recipe and source identity.
+This directory implements CIFAR-100, CIFAR-100-C, Tiny ImageNet-200 with explicit 64px or 32px inputs, and the declared MNIST-CIFAR cue-conflict experiment. It shares the project environment and core operators with PACS and Office-Home. Each study records its own resolved recipe and source identity.
 
 The main comparison is ERM, uniform non-target label smoothing, fixed global-to-local self-distillation, Zipf's Label Smoothing dense2, and CUE. These are training interventions on a common small-image ResNet-18. Final inference is global average pooling and the shared final classifier. CUE does not adapt or choose cues during testing.
+
+## ERM first, then Tiny ImageNet at 32px
+
+`classification/run.py erm` trains only the plain cross-entropy ResNet-18 baseline. The [`erm_5090.json`](configs/erm_5090.json) preset uses the same fixed optimizer, architecture, initialization, data split, augmentation, batch sizes, precision, and schedule as the original CUE-only 5090 preset. Its four runs are CIFAR-100 32px and Tiny ImageNet 64px, each with seeds 0 and 1. It does not rerun the completed CUE jobs. Compare its `erm_measured` results with the original `cue_measured` results, retaining both reports and their source identities; this command does not import, alter, or claim to have revalidated the historical checkpoints.
+
+The separate [`tiny32_ablation_5090.json`](configs/tiny32_ablation_5090.json) preset runs ERM and CUE at 32px on Tiny ImageNet, using the same two seeds and fixed hyperparameters. This is four additional runs, with paired CUE-minus-ERM differences in the report. Both presets disable tuning: the combined workload is **8 runs / 1,600 epochs**, with no hidden development, mechanism, or corruption jobs. Keep batch 1,024 and LR 0.8 for this comparison; raising the batch merely to fill VRAM would add another changed variable.
+
+`--tiny-imagenet-size 32` applies Pillow bilinear resizing before augmentation and normalization in **training, internal validation, and final evaluation**. The 32px crop has zero padding 4 and the 64px crop has padding 8, preserving the relative augmentation width. CIFAR processing is unchanged. The original 64px dataset files, split identities, and labels remain unchanged, so prepared data need not be downloaded or converted again. Resolution is stored in every recipe/contract, bound into preflight signatures, printed in the run log, and reported using the actual model input size. A different resolution requires a new run directory.
+
+Finish any currently running training before updating executable sources. Update through GitHub and verify the existing environment; there are no new requirements for these options:
+
+```bash
+(
+set -e
+set -o pipefail
+cd /workspace/cog_vision_model
+git pull --ff-only origin main
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate "$PWD/.conda"
+python bootstrap.py --device cuda --verify-only
+)
+```
+
+Run the native-resolution ERM baselines first:
+
+```bash
+(
+set -e
+set -o pipefail
+cd /workspace/cog_vision_model
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate "$PWD/.conda"
+mkdir -p results
+STAMP=$(date +%Y%m%d_%H%M%S)
+RUN_NAME="erm_native_bf16_b1024_seeds0_1_${STAMP}"
+
+python -u classification/run.py erm \
+  --config classification/configs/erm_5090.json \
+  --data-root data/classification \
+  --runs-dir "runs/${RUN_NAME}" \
+  --datasets cifar100 tiny_imagenet \
+  --seeds 0 1 \
+  --tiny-imagenet-size 64 \
+  --epochs 200 \
+  --milestones 100 150 \
+  --batch-size 1024 \
+  --eval-batch-size 2048 \
+  --learning-rate 0.8 \
+  --warmup-epochs 5 \
+  --momentum 0.9 \
+  --weight-decay 1e-4 \
+  --lr-decay 0.1 \
+  --precision bf16 \
+  --eval-precision fp32 \
+  --device cuda \
+  --workers 8 \
+  --max-vram-gib 28 \
+  2>&1 | tee "results/${RUN_NAME}.log"
+)
+```
+
+After that finishes, run both arms at 32px:
+
+```bash
+(
+set -e
+set -o pipefail
+cd /workspace/cog_vision_model
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate "$PWD/.conda"
+mkdir -p results
+STAMP=$(date +%Y%m%d_%H%M%S)
+RUN_NAME="tiny32_erm_cue_bf16_b1024_seeds0_1_${STAMP}"
+
+python -u classification/run.py ablation \
+  --config classification/configs/tiny32_ablation_5090.json \
+  --data-root data/classification \
+  --runs-dir "runs/${RUN_NAME}" \
+  --datasets tiny_imagenet \
+  --methods erm cue \
+  --seeds 0 1 \
+  --no-tune \
+  --tiny-imagenet-size 32 \
+  --epochs 200 \
+  --milestones 100 150 \
+  --batch-size 1024 \
+  --eval-batch-size 2048 \
+  --learning-rate 0.8 \
+  --warmup-epochs 5 \
+  --momentum 0.9 \
+  --weight-decay 1e-4 \
+  --lr-decay 0.1 \
+  --gate-tau 0.15 \
+  --gate-temperature 0.05 \
+  --joint-floor 0.5 \
+  --precision bf16 \
+  --eval-precision fp32 \
+  --device cuda \
+  --workers 8 \
+  --max-vram-gib 28 \
+  2>&1 | tee "results/${RUN_NAME}.log"
+)
+```
+
+Append `--dry-run` to either Python command to inspect its inputs and exact budget. The GPU preflight measures only the requested methods at their real input sizes, and observed epochs update the remaining-time estimate. Actual throughput and memory on the 5090 must be measured there; 32px is not promised to be four times faster. Outputs are `runs/<RUN_NAME>/comparison.json`, `comparison.md`, `progress.json`, and `preflight/`. For a resume, reuse the original run name, identical settings, and unchanged executable sources, and append logs with `tee -a`.
 
 ## Matched ResNet ablation and bounded tuning
 

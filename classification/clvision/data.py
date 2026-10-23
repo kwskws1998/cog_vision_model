@@ -541,14 +541,18 @@ def load_manifest(path, verify_bytes=True, root_override=None):
     return value
 
 
-def transform_image(image, dataset, training=False, seed=0):
-    """Apply only keyed, local-RNG transforms; preserve native dimensions and cue panels."""
+def transform_image(image, dataset, training=False, seed=0, tiny_imagenet_size=64):
+    """Resize Tiny before keyed augmentation; preserve native CIFAR and Dominoes processing."""
+    if type(tiny_imagenet_size) is not int or tiny_imagenet_size not in (32, 64):
+        raise ValueError("tiny_imagenet_size must be 32 or 64")
     value = np.array(image, dtype=np.uint8, copy=True)
     if value.ndim != 3 or value.shape[-1] != 3:
         raise ValueError("Expected HWC RGB image")
+    if dataset == "tiny_imagenet" and tiny_imagenet_size == 32:
+        value = np.asarray(Image.fromarray(value).resize((32, 32), Image.Resampling.BILINEAR))
     rng = np.random.default_rng(seed)
     if training and dataset != "dominoes":
-        padding = 4 if dataset == "cifar100" else 8
+        padding = 4 if dataset == "cifar100" else tiny_imagenet_size // 8
         height, width = value.shape[:2]
         padded = np.pad(value, ((padding, padding), (padding, padding), (0, 0)), mode="constant")
         y, x = rng.integers(0, 2 * padding + 1, size=2)
@@ -565,7 +569,7 @@ def transform_image(image, dataset, training=False, seed=0):
 class ImageDataset(Dataset):
     """Expose explicitly requested partitions; training never constructs a final-test dataset."""
 
-    def __init__(self, manifest, split, seed=0, epoch=0, diagnostic="both"):
+    def __init__(self, manifest, split, seed=0, epoch=0, diagnostic="both", tiny_imagenet_size=64):
         if split not in ("train", "validation", "test"):
             raise ValueError("Unknown partition")
         self.manifest, self.split, self.seed, self.epoch = manifest, split, seed, epoch
@@ -573,6 +577,9 @@ class ImageDataset(Dataset):
         self.indices = manifest["splits"][split]
         self.arrays = {}
         self.diagnostic = diagnostic
+        if type(tiny_imagenet_size) is not int or tiny_imagenet_size not in (32, 64):
+            raise ValueError("tiny_imagenet_size must be 32 or 64")
+        self.tiny_imagenet_size = tiny_imagenet_size
         if diagnostic not in ("both", "vehicle_only", "digit_only") or (
             diagnostic != "both" and split != "test"
         ):
@@ -667,7 +674,9 @@ class ImageDataset(Dataset):
                 int(self.arrays[f"{source}_labels"][index]),
             )
         augment_seed = key_seed("augment", self.seed, self.epoch, self.sample_id(item))
-        return transform_image(image, self.dataset, self.split == "train", augment_seed), target
+        return transform_image(
+            image, self.dataset, self.split == "train", augment_seed, self.tiny_imagenet_size
+        ), target
 
 
 class EpochBatches(Sampler):
@@ -699,7 +708,9 @@ class EpochBatches(Sampler):
 
 def make_loader(manifest, config, split, epoch=0, diagnostic="both"):
     """Keep worker RNGs isolated and require an explicit partition at every call."""
-    dataset = ImageDataset(manifest, split, config.seed, epoch, diagnostic)
+    dataset = ImageDataset(
+        manifest, split, config.seed, epoch, diagnostic, config.tiny_imagenet_size
+    )
     generator = torch.Generator().manual_seed(key_seed("workers", config.seed, epoch, split))
     options = {
         "num_workers": config.workers,

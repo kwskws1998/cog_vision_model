@@ -16,7 +16,13 @@ from .ablation_settings import add_ablation_arguments, load_ablation_arguments
 from .ablation_workflow import run_ablation
 from .arguments import add_study_arguments, load_study_arguments, study_preview
 from .config import MAIN_METHODS, recipe
-from .cue_settings import add_cue_arguments, load_cue_arguments
+from .cue_settings import (
+    CueSettings,
+    ErmSettings,
+    add_cue_arguments,
+    add_erm_arguments,
+    load_cue_arguments,
+)
 from .cue_workflow import run_cue_study
 from .data import (
     load_manifest,
@@ -226,6 +232,7 @@ def main(root):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     add_cue_arguments(commands.add_parser("cue"), root)
+    add_erm_arguments(commands.add_parser("erm"), root)
     add_ablation_arguments(commands.add_parser("ablation"), root)
     for name in ("check", "smoke"):
         commands.add_parser(name)
@@ -252,17 +259,22 @@ def main(root):
             command.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
             command.add_argument("--steps", type=int, default=1)
     arguments = parser.parse_args()
-    if arguments.command in ("cue", "ablation"):
+    if arguments.command in ("cue", "erm", "ablation"):
         try:
-            loader = load_cue_arguments if arguments.command == "cue" else load_ablation_arguments
-            settings = loader(arguments)
+            settings = (
+                load_ablation_arguments(arguments)
+                if arguments.command == "ablation"
+                else load_cue_arguments(
+                    arguments, ErmSettings if arguments.command == "erm" else CueSettings
+                )
+            )
         except (OSError, TypeError, ValueError) as error:
             parser.error(str(error))
         print(json.dumps(settings.preview(), indent=2), flush=True)
         if arguments.dry_run:
             return
         torch.set_num_threads(4)
-        runner = run_cue_study if arguments.command == "cue" else run_ablation
+        runner = run_ablation if arguments.command == "ablation" else run_cue_study
         runner(root, arguments.data_root, arguments.runs_dir, settings)
         print(
             f"{arguments.command} results: {arguments.runs_dir.resolve() / 'comparison.md'}",
