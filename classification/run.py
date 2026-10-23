@@ -1,31 +1,62 @@
 """Fail-fast Python driver for preparation and the complete Conda classification study."""
 
 import argparse
+import json
 import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path[:0] = [str(ROOT / "src"), str(ROOT / "classification")]
+
+
+def build_parser():
+    """Share the exact same study inputs with the underlying experiment command."""
+    from clvision.arguments import add_study_arguments
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    stages = parser.add_subparsers(dest="stage", required=True)
+    for name in ("check", "smoke"):
+        stages.add_parser(name)
+    prepare = stages.add_parser("prepare")
+    prepare.add_argument("--data-root", type=Path, default=ROOT / "data/classification")
+    for name in ("train", "plan"):
+        stage = stages.add_parser(name)
+        stage.add_argument("--data-root", type=Path, default=ROOT / "data/classification")
+        stage.add_argument("--runs-dir", type=Path, default=ROOT / "runs/classification_2seeds_v1")
+        add_study_arguments(stage, ROOT)
+        if name == "train":
+            stage.add_argument("--dry-run", action="store_true")
+    return parser
 
 
 def main():
     """Enforce Conda and stop the entire stage after any unsuccessful subprocess."""
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("stage", choices=("prepare", "train", "check", "smoke"))
-    parser.add_argument("--data-root", type=Path, default=ROOT / "data/classification")
-    parser.add_argument("--runs-dir", type=Path, default=ROOT / "runs/classification_v1")
-    parser.add_argument("--workers", type=int, default=4)
+    from clvision.arguments import load_study_arguments, study_argument_tokens, study_preview
+
+    parser = build_parser()
     arguments = parser.parse_args()
     if not (Path(sys.prefix) / "conda-meta/history").is_file():
         parser.error("Use conda run --prefix ./.conda python classification/run.py ...")
-    if arguments.workers < 0:
-        parser.error("workers must be nonnegative")
-    executable = [sys.executable, str(ROOT / "classification/experiment.py")]
+    if arguments.stage in ("train", "plan"):
+        try:
+            settings = load_study_arguments(arguments)
+        except (OSError, TypeError, ValueError) as error:
+            parser.error(str(error))
+        if arguments.stage == "plan" or arguments.dry_run:
+            print(json.dumps(study_preview(settings), indent=2))
+            return
+    executable = [sys.executable, "-u", str(ROOT / "classification/experiment.py")]
     environment = {**os.environ, "PYTHONNOUSERSITE": "1"}
     environment.pop("PYTHONPATH", None)
     environment.pop("PYTHONHOME", None)
-    common = ["--data-root", str(arguments.data_root.resolve())]
+    common = (
+        ["--data-root", str(arguments.data_root.resolve())]
+        if hasattr(arguments, "data_root")
+        else []
+    )
     if arguments.stage == "prepare":
         commands = [["check"], ["prepare", "--download", *common]]
         commands += [
@@ -39,14 +70,13 @@ def main():
                 *common,
                 "--runs-dir",
                 str(arguments.runs_dir.resolve()),
-                "--workers",
-                str(arguments.workers),
+                *study_argument_tokens(arguments),
             ]
         ]
     else:
         commands = [[arguments.stage]]
     for command in commands:
-        print("Running: " + " ".join(command), flush=True)
+        print("Running: " + shlex.join(executable + command), flush=True)
         subprocess.run(executable + command, cwd=ROOT, env=environment, check=True)
 
 

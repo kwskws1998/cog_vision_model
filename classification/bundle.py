@@ -1,8 +1,8 @@
-"""Build a CRC-checked additive release without datasets, environments, or checkpoints."""
+"""Build a verified full source release including the shared environment and experiment CLIs."""
 
 import argparse
+import subprocess
 import sys
-import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -10,7 +10,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 
 def main():
-    """Package classification sources and actual verification reports under one additive subtree."""
+    """Require fresh classification evidence, then include every shared runtime dependency."""
     from cue_routing.io import read_json
 
     parser = argparse.ArgumentParser(description=__doc__)
@@ -26,28 +26,10 @@ def main():
 
     if audit["source_sha256"] != source_hash(ROOT):
         raise ValueError("Sources changed after the release audit")
-    paths = [
-        path
-        for path in (ROOT / "classification").rglob("*")
-        if path.is_file()
-        and not set(path.parts) & {"__pycache__", ".ruff_cache", ".cache", "data", "runs"}
-        and path.suffix != ".pyc"
-    ]
-    arguments.output.parent.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(arguments.output, "w", zipfile.ZIP_DEFLATED) as archive:
-        for path in sorted(paths):
-            archive.write(path, path.relative_to(ROOT))
-    with zipfile.ZipFile(arguments.output) as archive:
-        if archive.testzip() is not None or any(
-            not name.startswith("classification/") for name in archive.namelist()
-        ):
-            raise ValueError("Release ZIP failed CRC or additive-path checks")
-    print(
-        {
-            "archive": str(arguments.output.resolve()),
-            "files": len(paths),
-            "bytes": arguments.output.stat().st_size,
-        }
+    subprocess.run(
+        [sys.executable, str(ROOT / "bundle.py"), "--output", str(arguments.output.resolve())],
+        cwd=ROOT,
+        check=True,
     )
 
 

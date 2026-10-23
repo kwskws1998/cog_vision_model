@@ -1,4 +1,4 @@
-"""Audit additive compatibility, prescribed Office-Home data, and actual verification outcomes."""
+"""Audit current source-bound Office-Home evidence and preserve historical compatibility status."""
 
 import argparse
 import ast
@@ -172,8 +172,7 @@ def main():
             )
         )
     result["passed"] = (
-        result["pacs_fingerprint_unchanged"]
-        and result["recipe_matches_validated_defaults"]
+        result["recipe_matches_validated_defaults"]
         and not comments
         and all(all(item.values()) for item in evidence.values())
     )

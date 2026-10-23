@@ -1,50 +1,95 @@
 # Controlled classification experiments
 
-This additive directory implements CIFAR-100, CIFAR-100-C, native-64px Tiny ImageNet-200, and the declared MNIST-CIFAR cue-conflict experiment. It preserves every existing PACS and Office-Home executable, recipe, environment file, and checkpoint contract.
+This directory implements CIFAR-100, CIFAR-100-C, native-64px Tiny ImageNet-200, and the declared MNIST-CIFAR cue-conflict experiment. It shares the project environment and core operators with PACS and Office-Home. Each study records its own resolved recipe and source identity.
 
 The main comparison is ERM, uniform non-target label smoothing, fixed global-to-local self-distillation, Zipf's Label Smoothing dense2, and CUE. These are training interventions on a common small-image ResNet-18. Final inference is global average pooling and the shared final classifier. CUE does not adapt or choose cues during testing.
 
 ## Server execution
 
-Use the existing project Conda environment from `/workspace/cog_vision_model`. The new code adds no runtime dependency. Finish any other training on the single GPU first.
+Run from the project directory, for example `/workspace/cog_vision_model`. Install the shared Conda environment using the [root setup instructions](../README.md#setup). The commands below use Bash and stop if any stage or a piped training process fails.
 
-```text
-git pull --ff-only origin main
-conda run --no-capture-output --prefix ./.conda python classification/run.py prepare
+Prepare the data once:
+
+```bash
+(
+set -e
+set -o pipefail
+
+cd /workspace/cog_vision_model
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate "$PWD/.conda"
+
+python -u classification/run.py prepare \
+  --data-root data/classification
+)
 ```
 
-Preparation first runs the combined legacy and classification tests, then downloads/verifies all required data, then completes CPU updates on real training images. It never computes final-test predictions. Downloads resume interrupted transfers and require complete release checksums before extraction. The corruption archive is about 2.9 GB. CIFAR uses the byte-identical Paddle mirror with the original MD5; Toronto remains a fallback. Tiny's original Stanford endpoint may be unavailable; the downloader then uses the Zenodo mirror only if the complete archive matches the same published MD5. There is no resized-data fallback.
+Preparation runs the combined tests, downloads/verifies all required data, and checks CPU updates on real training images. It does not compute final-test predictions. Downloads resume interrupted transfers and verify complete release checksums before extraction.
 
-After preparation succeeds:
+The editable experiment inputs are in [`configs/experiment.json`](configs/experiment.json). `clvision/settings.py` validates and resolves them; `clvision/workflow.py` executes the resolved study; `clvision/engine.py` implements training and evaluation. The study includes both natural datasets, all five main methods, and the six mechanism methods. Edit the JSON or the explicit arguments below to change its settings.
 
-```text
-conda run --no-capture-output --prefix ./.conda python classification/run.py train
+Preview the exact recipes and run count without loading datasets or starting training:
+
+```bash
+python classification/run.py train \
+  --config classification/configs/experiment.json \
+  --seeds 0 1 \
+  --epochs 200 \
+  --milestones 100 150 \
+  --mechanism-epochs 50 \
+  --mechanism-milestones 25 40 \
+  --batch-size 128 \
+  --eval-batch-size 128 \
+  --learning-rate 0.1 \
+  --dry-run
 ```
 
-This command performs real-data CUDA preflight before creating a study: all interventions, batch128, evaluation batch128, SGD momentum state, and ten accepted AMP updates per method. It checks matched initial shared tensors and augmented batches. A failed or unavailable GPU stops the job; CPU verification is never accepted as measured CUDA fit. The peak reserved-memory budget is20GiB, with no silent batch, resolution, or precision reduction.
+Launch the complete study with explicit inputs and a separate timestamped log:
 
-The full study then executes the following fixed order:
+```bash
+(
+set -e
+set -o pipefail
 
-1. CIFAR validation-only development: three candidates each for CUE, fixed consistency, and Zipf; freeze the choices.
-2. Eighteen mechanism runs: six interventions, seeds0/1/2. No mechanism final-test result is opened here.
-3. Twenty-five CIFAR main runs: five interventions, seeds0/1/2/3/4.
-4. Tiny validation-only development and twenty-five Tiny main runs.
-5. Seal the complete intended study and evaluate all main/mechanism final checkpoints.
-6. Evaluate the same25 CIFAR checkpoints on the75 registered CIFAR-100-C conditions.
-7. Write `runs/classification_v1/comparison.json` and `comparison.md`.
+cd /workspace/cog_vision_model
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate "$PWD/.conda"
+mkdir -p results
 
-There are50 full main runs,18 full validation-candidate runs, and18 shorter mechanism runs. Natural-image runs last200 epochs; mechanism runs last50 epochs. These run counts are not a measured ETA. Each epoch prints validation accuracy, loss, elapsed seconds, and an ETA based on that process's observed speed.
+STAMP=$(date +%Y%m%d_%H%M%S)
+RUN_NAME="classification_fp16_b128_seeds0_1_${STAMP}"
 
-Repeat the same train command after interruption. It rechecks GPU preflight, verifies/reuses completed runs, resumes incomplete runs from the last complete epoch, and resumes corruption evaluation by cell. Mid-epoch work is replayed with identical sample order/augmentation and restored model, SGD momentum, scaler, and RNG state. No model training continues after its final-test access.
-
-Custom locations must be supplied consistently to preparation and training:
-
-```text
-conda run --no-capture-output --prefix ./.conda python classification/run.py prepare --data-root /workspace/data/classification
-conda run --no-capture-output --prefix ./.conda python classification/run.py train --data-root /workspace/data/classification --runs-dir /workspace/results/classification_v1
+python -u classification/run.py train \
+  --config classification/configs/experiment.json \
+  --data-root data/classification \
+  --runs-dir "runs/${RUN_NAME}" \
+  --seeds 0 1 \
+  --development-seed 2027 \
+  --epochs 200 \
+  --milestones 100 150 \
+  --mechanism-epochs 50 \
+  --mechanism-milestones 25 40 \
+  --batch-size 128 \
+  --eval-batch-size 128 \
+  --learning-rate 0.1 \
+  --momentum 0.9 \
+  --weight-decay 1e-4 \
+  --lr-decay 0.1 \
+  --precision fp16 \
+  --device cuda \
+  --workers 4 \
+  --max-vram-gib 20 \
+  2>&1 | tee "results/${RUN_NAME}.log"
+)
 ```
 
-For a new machine only, use the existing `python3 bootstrap.py --device cuda` before these commands. Do not rebuild an environment currently used by another experiment.
+`--seeds` sets the main and mechanism seed lists together. `--main-seeds` and `--mechanism-seeds` override their respective lists if supplied; duplicate, empty, or out-of-range lists are rejected. The default remains seeds 0 and 1, with development seed 2027: 18 validation-candidate runs, 20 natural-image main runs, and 12 mechanism runs, totaling 50 training runs. Three seeds (`--seeds 0 1 2`) produce 66 runs with the default candidate grids. The preview calculates counts from your actual settings.
+
+Precedence is built-in defaults, JSON common training settings, JSON dataset-family schedules, JSON dataset overrides, then explicit CLI flags. Natural-image `--epochs`/`--milestones` and mechanism `--mechanism-epochs`/`--mechanism-milestones` are separate. Supply compatible milestones when changing epochs; `--milestones` with no values disables the natural-image milestone schedule. Validation grids and dataset-specific coefficients can be edited in JSON; each dataset keeps an equal positive candidate budget across the three tuned methods.
+
+The same resolved recipes drive CUDA preflight and training. Preflight checks every intervention using actual data, the requested training/evaluation batch sizes and precision, and ten accepted optimizer updates. A failed preflight stops the study. The workflow then develops on internal validation, freezes choices, trains all main/mechanism runs, seals the complete study, and evaluates the final checkpoints, including CIFAR-100-C. Results are written to the selected run directory as `comparison.json` and `comparison.md`.
+
+To resume, reuse the original `--runs-dir` and identical settings, and use `tee -a` to append to its log. Do not generate a new timestamp for a resume. Completed runs are verified and reused; incomplete runs resume from the last complete epoch. A changed seed list, recipe, dataset, or executable source requires a new run directory. `plan.json` records the resolved settings and recipes before training; existing contracts are not rewritten to accept changes. The JSON plan and per-run contracts are the authoritative record for a customized experiment.
 
 ## Standalone checks
 
@@ -82,12 +127,16 @@ The Zipf port retains final-plus-penultimate votes, factor-two bilinear spatial 
 
 CUE uses the current per-cue detached disagreement gate and its exactly gradient-equivalent global-to-local KL expression. The numerical implementation checks gradients through both shared features and classifier parameters. Its scalar logged loss need not equal the legacy surrogate's scalar value. A gain over fixed consistency is required to attribute usefulness to adaptive weighting.
 
-Development is limited to three final-epoch validation candidates per tunable method, using training seed2027. CUE thresholds are0.05/0.15/0.30 at temperature0.05 and joint floor0.5; fixed KL weights are0.1/0.25/0.5; Zipf KL weights are0.03/0.1/0.3 on CIFAR and0.3/1/3 on Tiny. Validation selection prefers accuracy, then lower NLL, then registered candidate order. Candidate completion hashes are bound into the frozen selection and main-run contracts.
+The default development grid has three final-epoch validation candidates per tunable method, using training seed2027. CUE thresholds are0.05/0.15/0.30 at temperature0.05 and joint floor0.5; fixed KL weights are0.1/0.25/0.5; Zipf KL weights are0.03/0.1/0.3 on CIFAR and0.3/1/3 on Tiny. Validation selection prefers accuracy, then lower NLL, then registered candidate order. Candidate completion hashes are bound into the frozen selection and main-run contracts.
 
 ## Evidence and limitations
 
-The primary question is whether the adaptive method improves on fixed consistency on both natural datasets. ERM and label smoothing test practical value; Zipf is the selected external comparator. All seeds and methods are reported. Bootstrap intervals over paired seed differences are descriptive; the code does not claim statistical significance or2026 state of the art. A corruption-only gain with lower clean accuracy is a tradeoff. A mechanism-only gain does not establish general image classification utility.
+The primary question is whether the adaptive method improves on fixed consistency on both natural datasets. ERM and label smoothing test practical value; Zipf is the selected external comparator. All seeds and methods are reported. With only two pilot seeds, bootstrap intervals are descriptive and unstable; the code does not claim statistical significance or2026 state of the art. A corruption-only gain with lower clean accuracy is a tradeoff. A mechanism-only gain does not establish general image classification utility.
 
 The completed PACS result remains a negative ERM comparison. Existing Office-Home training remains supplementary DG evidence. This code does not implement a new ViT benchmark or prove the cognitive interpretation of final feature-map regions.
 
 See `REVIEW.md` for implementation checks, `SOURCES.md` for exact paper excerpts, and generated `verification/` reports for the source-bound outcomes actually measured on the executing machine.
+
+The default settings retain the two-seed pilot. Existing study plans and checkpoints cannot be resumed across changed source or scope. Finish or stop an existing training process before updating code; keep its original results as a separate study.
+
+The audit retains historical PACS/Office-Home hash comparisons as provenance information; current verification still requires matching current source hashes and successful outcomes. Because the configurable workflow also updates shared setup and CLI modules, distribute the full project using `python bundle.py --output /absolute/path/to/cog_vision_model.zip`. `classification/bundle.py` produces the same complete source layout after requiring a current passing classification audit. Neither package includes datasets, environments, caches, or run checkpoints.

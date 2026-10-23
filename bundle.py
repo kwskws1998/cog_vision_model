@@ -20,13 +20,22 @@ def main():
         if path.is_file() and path.suffix in (".py", ".md", ".json", ".txt", ".toml", ".yml")
     ]
     paths += [root / ".gitignore"]
-    for folder in ("src", "tests", "configs", "references", "verification"):
+    for folder in (
+        "src",
+        "tests",
+        "configs",
+        "references",
+        "verification",
+        "classification",
+        "office_home",
+    ):
         paths += [
             path
             for path in (root / folder).rglob("*")
             if path.is_file()
             and path.suffix in (".py", ".md", ".json", ".txt")
-            and "__pycache__" not in path.parts
+            and not set(path.relative_to(root / folder).parts)
+            & {"__pycache__", ".cache", ".ruff_cache", "data", "runs", "results", ".conda", ".git"}
             and not any(part.endswith(".egg-info") for part in path.parts)
         ]
     descriptor, temporary = tempfile.mkstemp(suffix=".zip", dir=args.output.parent)

@@ -68,4 +68,41 @@ The importer recognizes the documented Dassl train/val layout, but that archive 
 
 Generated Office-Home reports live in `office_home/verification/` and are Git-ignored so GPU runs do not create report-file pull conflicts. Release bundles include the actual reports. With `requirements-dev.txt` installed in the same Conda environment, run `python office_home/audit.py --lint` after generating the CPU reports. The audit fails on stale evidence or failed outcomes.
 
-To make an additive ZIP, run `python office_home/bundle.py --addon-only --output /absolute/path/to/officehome_addon.zip`. Extract that ZIP inside the existing repository. A full source ZIP is produced by omitting `--addon-only`. Neither bundle includes datasets, environments, caches, or training checkpoints. The existing root `bundle.py` remains the unchanged PACS packager.
+To share the current workflow, use `python bundle.py --output /absolute/path/to/cog_vision_model.zip` or `python office_home/bundle.py --output /absolute/path/to/cog_vision_model.zip`. These full source bundles include shared CLI and environment changes. The historical `--addon-only` option requires a recipient with exactly matching shared source and is not a standalone distribution. Neither bundle includes datasets, environments, caches, or training checkpoints. The root packager includes PACS, Office-Home, and classification.
+
+## Explicit run inputs
+
+The shared [Conda/requirements setup](../README.md#setup) installs this workflow too. `run.py` accepts explicit training settings and forwards the same resolved recipe to CUDA profiling, the real-data smoke, and the matrix. Preview the commands and resolved recipe with `--dry-run` before preparing data or starting training.
+
+```bash
+(
+set -e
+set -o pipefail
+
+cd /workspace/cog_vision_model
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate "$PWD/.conda"
+mkdir -p results
+
+STAMP=$(date +%Y%m%d_%H%M%S)
+RUN_NAME="officehome_resnet18_fp16_seeds0_1_${STAMP}"
+
+python -u office_home/run.py train \
+  --config office_home/configs/officehome_resnet18.json \
+  --manifest data/officehome_manifest.json \
+  --runs-dir "runs/${RUN_NAME}" \
+  --seeds 0 1 \
+  --steps 5000 \
+  --eval-every 200 \
+  --batch-per-domain 16 \
+  --eval-batch-size 64 \
+  --learning-rate 5e-5 \
+  --weight-decay 0 \
+  --precision fp16 \
+  --workers 4 \
+  --smoke-steps 10 \
+  2>&1 | tee "results/${RUN_NAME}.log"
+)
+```
+
+`--steps` is the training budget; `--smoke-steps` is the number of preflight updates. Reuse the original run directory and identical inputs to resume, appending to the log with `tee -a`. Shared CLI/environment changes produce a new source identity; old contracts and verification reports remain tied to their original source.

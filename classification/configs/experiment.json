@@ -1,0 +1,47 @@
+{
+  "debug": false,
+  "workers": 4,
+  "main_seeds": [0, 1],
+  "mechanism_seeds": [0, 1],
+  "development_seed": 2027,
+  "training": {
+    "batch_size": 128,
+    "eval_batch_size": 128,
+    "learning_rate": 0.1,
+    "momentum": 0.9,
+    "weight_decay": 0.0001,
+    "lr_decay": 0.1,
+    "gate_temperature": 0.05,
+    "joint_floor": 0.5,
+    "zipf_power": 1.0,
+    "label_smoothing": 0.1,
+    "device": "cuda",
+    "precision": "fp16",
+    "max_vram_gib": 20.0,
+    "gradient_clip": 0.0
+  },
+  "natural_schedule": {
+    "epochs": 200,
+    "milestones": [100, 150]
+  },
+  "mechanism_schedule": {
+    "epochs": 50,
+    "milestones": [25, 40]
+  },
+  "dataset_overrides": {
+    "cifar100": {"zipf_aux_weight": 0.1},
+    "tiny_imagenet": {"zipf_aux_weight": 0.5}
+  },
+  "development_candidates": {
+    "cifar100": {
+      "cue": [0.05, 0.15, 0.3],
+      "fixed_global_local": [0.1, 0.25, 0.5],
+      "zipfls_dense2": [0.03, 0.1, 0.3]
+    },
+    "tiny_imagenet": {
+      "cue": [0.05, 0.15, 0.3],
+      "fixed_global_local": [0.1, 0.25, 0.5],
+      "zipfls_dense2": [0.3, 1.0, 3.0]
+    }
+  }
+}

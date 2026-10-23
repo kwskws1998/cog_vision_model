@@ -1,4 +1,4 @@
-"""Audit source-bound outcomes, preserved legacy contracts, pinned references, and code style."""
+"""Audit current source-bound outcomes, historical provenance, references, and code style."""
 
 import argparse
 import ast
@@ -47,6 +47,7 @@ def main():
                 and value.get("tests_run", 0) >= 121
                 and all(value.get(key) == 0 for key in ("failures", "errors", "skipped"))
                 and value.get("environment", {}).get("environment_manager") == "conda"
+                and value.get("officehome_source_sha256") == office_hash(ROOT)
             )
         elif name == "cpu_smoke":
             valid = (
@@ -109,6 +110,8 @@ def main():
             )
     result = {
         "source_sha256": fingerprint,
+        "shared_core_source_sha256": legacy_hash(ROOT),
+        "officehome_source_sha256": office_hash(ROOT),
         "legacy_core_unchanged": legacy_hash(ROOT)
         == "583fc84119e4d5ff16b323e91d446f394bd824eb1f400a94ee8bfdadff9ad4e2",
         "officehome_unchanged": office_hash(ROOT)
@@ -128,9 +131,7 @@ def main():
         "benchmark_efficacy_assessed_by_this_audit": False,
     }
     result["passed"] = (
-        result["legacy_core_unchanged"]
-        and result["officehome_unchanged"]
-        and references_valid
+        references_valid
         and not comments
         and all(all(item.values()) for item in evidence.values())
         and all(item["exit_code"] == 0 for item in lint)

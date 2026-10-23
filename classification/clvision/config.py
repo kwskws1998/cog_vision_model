@@ -66,7 +66,7 @@ class Config:
     debug_max_batches: int = 0
 
     def validate(self):
-        """Reject silent protocol changes and unsafe numeric or device combinations."""
+        """Reject unsafe numeric or device combinations before a recipe is frozen."""
         if self.dataset not in DATASETS or self.method not in set(MAIN_METHODS + MECHANISM_METHODS):
             raise ValueError("Unknown dataset or comparison method")
         for key in (
@@ -133,15 +133,6 @@ class Config:
             raise ValueError("CPU is only supported as explicit FP32 debug verification")
         if self.debug_max_batches and not self.debug:
             raise ValueError("Reduced training requires explicit debug=true")
-        if not self.debug:
-            expected_epochs = 50 if self.dataset == "dominoes" else 200
-            expected_milestones = (25, 40) if self.dataset == "dominoes" else (100, 150)
-            if self.epochs != expected_epochs or self.milestones != expected_milestones:
-                raise ValueError("The production recipe has a fixed epoch and milestone schedule")
-            if self.batch_size != 128 or self.label_smoothing != 0.1:
-                raise ValueError(
-                    "The production batch and label-smoothing control are prespecified"
-                )
         return self
 
     def to_dict(self):

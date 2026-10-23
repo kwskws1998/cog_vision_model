@@ -8,7 +8,7 @@ This file describes review scope. Actual pass counts and source fingerprints are
 - Digit and vehicle identities are separated before pairing; only vehicle labels define the mechanism outcome. Counterfactual tests use identical vehicle images under both digits.
 - Only15 registered corruptions at5 levels enter the corruption average. Clean checkpoint weights and normalization remain fixed.
 - Fixed-final-epoch checkpoints prevent target-derived selection. Development uses exactly three candidates per tunable intervention and freezes their scores and completion identities.
-- All planned natural and mechanism training finishes before final evaluation. Production scope is50 main plus18 development plus18 mechanism runs.
+- All planned natural and mechanism training finishes before final evaluation. The requested pilot scope is 20 main plus 18 development plus 12 mechanism runs, using paired seeds 0 and 1 for main/mechanism training.
 
 ## Numerical operators and optimization
 
@@ -35,10 +35,14 @@ CPU tests and synthetic studies verify code paths, not efficacy or target-GPU fi
 
 The common torchvision post-activation backbone differs from Zipf's original small-image pre-activation backbone; native64px Tiny differs from its published32px recipe. The comparison is an explicit matched operator port. The module is training-only and no ViT efficacy experiment is implemented here.
 
-## Measured local verification, 2026-10-23
+## Original implementation verification, 2026-10-23
 
-The final combined run completed 125 tests with zero failures, errors, or skips in the existing Conda environment. The complete synthetic study passed, reused completed checkpoints exactly, and rejected reordered prediction identities. All five main methods accepted real CPU training updates on CIFAR-100, Tiny ImageNet, and Dominoes, with identical shared initialization and first augmented batches within each dataset. CPU checks are explicitly marked as verification only.
+Before the two-seed amendment, the combined run completed 125 tests with zero failures, errors, or skips in the existing Conda environment. The complete synthetic study passed, reused completed checkpoints exactly, and rejected reordered prediction identities. All five main methods accepted real CPU training updates on CIFAR-100, Tiny ImageNet, and Dominoes, with identical shared initialization and first augmented batches within each dataset. CPU checks are explicitly marked as verification only.
 
 A standalone CUDA profile returned exit code 2 with `measured=false` and `passes_budget=false` because this Mac has no CUDA device. It did not substitute CPU evidence for GPU fit. The server's full-batch preflight is still required.
 
 The authoritative executable fingerprint and generated outcomes are in the packaged verification JSON files. No benchmark accuracy or superiority conclusion follows from these checks.
+
+## Two-seed amendment
+
+The main and mechanism seed lists are both exactly `[0, 1]`; development retains seed 2027 and all nine candidates per natural dataset. The production-scope regression checks 20 main and 12 mechanism runs, and rejects an existing plan containing the previous seed lists. The amended default output directory is `runs/classification_2seeds_v1`. Fresh outcomes are recorded by the current-source test report.

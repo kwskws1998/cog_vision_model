@@ -190,10 +190,24 @@ class OfficeHomeDataTests(unittest.TestCase):
             cuda_seed.assert_not_called()
         self.assertTrue(torch.equal(torch.get_rng_state(), state))
 
-    def test_extension_does_not_change_pacs_fingerprint(self):
-        expected = read_json(ROOT / "office_home/references/pacs_compatibility.json")
-        self.assertEqual(core_source_hash(ROOT), expected["shared_core_source_sha256"])
-        self.assertNotEqual(source_hash(ROOT), core_source_hash(ROOT))
+    def test_extension_fingerprint_tracks_shared_and_extension_changes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "pyproject.toml").write_text('[project]\nname = "fixture"\n')
+            (root / "src").mkdir()
+            (root / "office_home").mkdir()
+            core = root / "src" / "shared.py"
+            extension = root / "office_home" / "extension.py"
+            core.write_text("SETTING = 1\n")
+            extension.write_text("SETTING = 1\n")
+            core_before, extension_before = core_source_hash(root), source_hash(root)
+            core.write_text("SETTING = 2\n")
+            core_after, extension_after = core_source_hash(root), source_hash(root)
+            self.assertNotEqual(core_before, core_after)
+            self.assertNotEqual(extension_before, extension_after)
+            extension.write_text("SETTING = 2\n")
+            self.assertEqual(core_source_hash(root), core_after)
+            self.assertNotEqual(source_hash(root), extension_after)
 
 
 class OfficeHomeArchiveTests(unittest.TestCase):

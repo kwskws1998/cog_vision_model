@@ -98,17 +98,28 @@ class ClassificationWorkflowTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 corruption_summary({**artifact, **update}, "contract", "seal", "data", 10000)
 
-    def test_production_scope_is_fifty_main_and_eighteen_mechanism_runs(self):
-        """The full scope cannot be silently narrowed to a winning seed or dataset."""
+    def test_production_scope_is_twenty_main_and_twelve_mechanism_runs(self):
+        """The requested two-seed pilot must retain every declared method and dataset."""
         folder = self.folder / "study"
         folder.mkdir()
         plan = freeze_plan(folder, self.manifests, ROOT, {"debug": False, "workers": 4})
+        self.assertEqual(plan["main_seeds"], [0, 1])
+        self.assertEqual(plan["mechanism_seeds"], [0, 1])
         self.assertEqual(
-            len(plan["main_seeds"]) * len(MAIN_METHODS) * len(plan["natural_datasets"]), 50
+            len(plan["main_seeds"]) * len(MAIN_METHODS) * len(plan["natural_datasets"]), 20
         )
-        self.assertEqual(len(plan["mechanism_seeds"]) * len(MECHANISM_METHODS), 18)
+        self.assertEqual(len(plan["mechanism_seeds"]) * len(MECHANISM_METHODS), 12)
+        self.assertEqual(
+            len(candidate_configs(base_recipe("cifar100", {"debug": False, "workers": 4}))), 9
+        )
         with self.assertRaises(ValueError):
             freeze_plan(folder, self.manifests, ROOT, {"debug": True, "workers": 0})
+        atomic_json(
+            folder / "plan.json",
+            {**plan, "main_seeds": [0, 1, 2, 3, 4], "mechanism_seeds": [0, 1, 2]},
+        )
+        with self.assertRaises(ValueError):
+            freeze_plan(folder, self.manifests, ROOT, {"debug": False, "workers": 4})
 
     def test_incomplete_scope_cannot_grant_test_access(self):
         """A partial collection of completed runs never authorizes final evaluation."""

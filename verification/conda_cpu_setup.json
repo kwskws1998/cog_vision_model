@@ -5,10 +5,28 @@
   "torchvision": "0.23.0",
   "cuda_runtime": null,
   "cuda_available": false,
+  "dependencies": {
+    "torch": "2.8.0",
+    "torchvision": "0.23.0",
+    "numpy": "2.0.2",
+    "Pillow": "11.3.0",
+    "gdown": "5.2.0",
+    "filelock": "3.19.1",
+    "ruff": "0.14.1"
+  },
   "environment_manager": "conda",
   "requested_device": "cpu",
+  "development_dependencies_checked": true,
+  "verification_only": true,
   "wheel_index": "https://download.pytorch.org/whl/cpu",
+  "requirements_file": "requirements-cpu.txt",
+  "requirements_sha256": {
+    "requirements-cpu.txt": "3defa7476d89ff4a939c807f0021073de44602843c8fbb732f29d65c9105f6e4",
+    "requirements-cuda.txt": "84e6816f925caffe9f8588622956fa008a319bfa4ddd2e9ccdbdf6a62130d659",
+    "requirements-dev.txt": "7d5cc3628924523c59d948896bf0fde84d842229a63d66acce3f5c980ad75a05",
+    "requirements.txt": "b096b184b669b6cbf2794898300dbe1ed98a0b9d1b9faa5d0f62527706fb5ef9"
+  },
   "environment_yml_sha256": "1f616acc25b79524ea19beac0b25e185f5341dd4cb2c2dee2cc9c765f41b44ea",
-  "bootstrap_sha256": "b719b2e5bbdbd588b9792d65be26b681d7f498eae27377e8ed4c552f497778e0",
-  "project_metadata_sha256": "0708719a1683cea0f5da3515c2f1889bb58b8f3ad9e4d3a02eeb9ac80af8ebca"
+  "bootstrap_sha256": "16702e1625f5d4caee89eece02686fa23259b562be6555c95eceac9de8dba61b",
+  "project_metadata_sha256": "a53c593a0453121b50a93e62b2e0c076ed2e642843aa0cbda6f23fdaa93c784a"
 }

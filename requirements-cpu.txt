@@ -1,0 +1,4 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+-r requirements.txt
+torch==2.8.0+cpu ; platform_system != "Darwin"
+torchvision==0.23.0+cpu ; platform_system != "Darwin"

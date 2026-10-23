@@ -11,6 +11,7 @@ from pathlib import Path
 
 import torch
 
+from .arguments import add_config_arguments, load_config_arguments, load_data_smoke_config
 from .config import DOMAINS, METHODS, ExperimentConfig
 from .data import (
     download_pacs,
@@ -47,14 +48,8 @@ from .protocol import verify_selection
 
 
 def load_config(arguments):
-    """Apply only explicitly supplied method, target, and seed overrides."""
-    config = ExperimentConfig.load(arguments.config)
-    updates = {
-        key: getattr(arguments, key)
-        for key in ("method", "target", "seed")
-        if getattr(arguments, key, None) is not None
-    }
-    return replace(config, **updates).validate()
+    """Validate the final recipe after all explicit hyperparameter overrides are merged."""
+    return load_config_arguments(arguments, ExperimentConfig)
 
 
 def check(project_root):
@@ -520,36 +515,56 @@ def report_matrix(directory):
     return result
 
 
-def main(project_root):
+def main(project_root, argv=None):
     """Dispatch explicit dataset preparation, verification, training, and testing commands."""
     root = Path(project_root)
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("--threads", type=int, default=4, help="CPU threads; fixed across arms")
     commands = parser.add_subparsers(dest="command", required=True)
     for command in ("check", "smoke", "pretrained-smoke"):
-        commands.add_parser(command)
-    prepare = commands.add_parser("prepare")
+        commands.add_parser(command, allow_abbrev=False)
+    prepare = commands.add_parser("prepare", allow_abbrev=False)
     prepare.add_argument("--data-root", type=Path, default=root / "data" / "PACS")
     prepare.add_argument("--manifest", type=Path, default=root / "data" / "pacs_manifest.json")
     prepare.add_argument("--archive", type=Path)
     prepare.add_argument("--download", action="store_true")
-    data_smoke = commands.add_parser("data-smoke")
+    data_smoke = commands.add_parser("data-smoke", allow_abbrev=False)
     data_smoke.add_argument("--manifest", type=Path, default=root / "data" / "pacs_manifest.json")
-    data_smoke.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
-    data_smoke.add_argument("--target", choices=DOMAINS)
-    data_smoke.add_argument("--seed", type=int)
-    data_smoke.add_argument("--steps", type=int)
+    add_config_arguments(
+        data_smoke,
+        ExperimentConfig,
+        exclude=("method", "steps"),
+        choices={"target": DOMAINS},
+    )
+    data_smoke.add_argument(
+        "--steps",
+        dest="smoke_steps",
+        type=int,
+        help="Optimizer updates per method (default: 1 on CPU, 10 on CUDA)",
+    )
+    data_smoke.add_argument(
+        "--training-steps",
+        dest="steps",
+        type=int,
+        help="Training-budget configuration field; does not change the smoke update count",
+    )
     data_smoke.add_argument("--config", type=Path, default=root / "configs" / "pacs_resnet18.json")
     for command in ("train", "matrix", "profile"):
-        sub = commands.add_parser(command)
+        sub = commands.add_parser(command, allow_abbrev=False)
         sub.add_argument("--config", type=Path, default=root / "configs" / "pacs_resnet18.json")
+        excluded = ("method", "target", "seed") if command == "matrix" else ()
+        if command == "profile":
+            excluded = ("method", "target")
+        add_config_arguments(
+            sub,
+            ExperimentConfig,
+            exclude=excluded,
+            choices={"method": METHODS, "target": DOMAINS},
+        )
         if command != "profile":
             sub.add_argument("--manifest", type=Path, default=root / "data" / "pacs_manifest.json")
         if command == "train":
             sub.add_argument("--run-dir", type=Path, required=True)
-            sub.add_argument("--method", choices=METHODS)
-            sub.add_argument("--target", choices=DOMAINS)
-            sub.add_argument("--seed", type=int)
             sub.add_argument("--resume", action="store_true")
             sub.add_argument("--stop-after", type=int)
         elif command == "matrix":
@@ -560,12 +575,12 @@ def main(project_root):
             sub.add_argument(
                 "--output", type=Path, default=root / "verification" / "cuda_memory.json"
             )
-    evaluate = commands.add_parser("evaluate")
+    evaluate = commands.add_parser("evaluate", allow_abbrev=False)
     evaluate.add_argument("--manifest", type=Path, default=root / "data" / "pacs_manifest.json")
     evaluate.add_argument("--run-dir", type=Path, required=True)
-    report = commands.add_parser("report")
+    report = commands.add_parser("report", allow_abbrev=False)
     report.add_argument("--runs-dir", type=Path, required=True)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.threads < 1:
         parser.error("--threads must be positive")
     torch.set_num_threads(args.threads)
@@ -576,22 +591,7 @@ def main(project_root):
     elif args.command == "pretrained-smoke":
         result = pretrained_smoke(root)
     elif args.command == "data-smoke":
-        config = load_config(args)
-        if args.device == "cpu":
-            config = replace(
-                config,
-                device="cpu",
-                precision="fp32",
-                batch_per_domain=1,
-                eval_batch_size=3,
-                steps=1,
-                eval_every=1,
-                workers=0,
-                debug=True,
-            ).validate()
-        elif config.device != "cuda":
-            parser.error("data-smoke --device cuda requires device=cuda in its config")
-        steps = args.steps if args.steps is not None else (10 if args.device == "cuda" else 1)
+        config, steps = load_data_smoke_config(args, ExperimentConfig)
         result = real_data_smoke(args.manifest, root, config, steps)
     elif args.command == "prepare":
         if args.download and args.archive:

@@ -6,15 +6,18 @@ build-backend = "setuptools.build_meta"
 name = "cue-credit-routing"
 version = "0.1.0"
 description = "Controlled PACS comparison of cue-wise error routing, RSC, and ERM"
-requires-python = ">=3.9"
-dependencies = ["torch==2.8.0", "torchvision==0.23.0", "numpy==2.0.2", "Pillow==11.3.0", "gdown==5.2.0", "filelock==3.19.1"]
+requires-python = ">=3.11,<3.12"
+dynamic = ["dependencies"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py39"
+target-version = "py311"
 extend-exclude = [".conda", ".cache", "data", "runs"]
 
 [tool.ruff.lint]

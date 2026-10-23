@@ -132,6 +132,8 @@ def main():
         and setup.get("environment_yml_sha256") == file_hash(ROOT / "environment.yml")
         and setup.get("bootstrap_sha256") == file_hash(ROOT / "bootstrap.py")
         and setup.get("project_metadata_sha256") == file_hash(ROOT / "pyproject.toml")
+        and setup.get("requirements_sha256")
+        == {path.name: file_hash(path) for path in sorted(ROOT.glob("requirements*.txt"))}
     )
     result["passed"] = (
         not comments

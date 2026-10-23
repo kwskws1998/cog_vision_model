@@ -1,18 +1,45 @@
-"""Create a project-local Conda environment with explicit CPU or CUDA 12.6 wheels."""
+"""Create or verify a project-local Conda environment from pinned requirements files."""
 
 import argparse
 import hashlib
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 from pathlib import Path
+
+RUNTIME_PROBE = """
+import importlib.metadata
+import json
+import sys
+from pathlib import Path
+
+import torch
+import torchvision
+
+prefix = Path(sys.prefix).resolve()
+assert (prefix / "conda-meta" / "history").is_file(), "A Conda environment is required"
+assert Path(torch.__file__).resolve().is_relative_to(prefix), "PyTorch is outside the environment"
+assert Path(torchvision.__file__).resolve().is_relative_to(prefix), "torchvision is outside the environment"
+print(json.dumps({
+    "prefix": str(prefix),
+    "python": sys.version.split()[0],
+    "torch": torch.__version__,
+    "torchvision": torchvision.__version__,
+    "cuda_runtime": torch.version.cuda,
+    "cuda_available": torch.cuda.is_available(),
+    "dependencies": {name: importlib.metadata.version(name) for name in json.loads(sys.argv[1])},
+}))
+"""
 
 
 def resolve_conda(value=None):
     """Locate Conda without installing into or modifying the base environment."""
     candidate = value or os.environ.get("CONDA_EXE") or shutil.which("conda")
+    if candidate:
+        candidate = shutil.which(str(candidate)) or candidate
     if not candidate or not Path(candidate).is_file():
         raise RuntimeError(
             "Conda was not found; install Miniconda/Anaconda or pass --conda /absolute/path/to/conda"
@@ -20,19 +47,40 @@ def resolve_conda(value=None):
     return str(Path(candidate).resolve())
 
 
-def wheel_specification(device, system):
-    """Pin the local build tag so an existing CPU install cannot satisfy a CUDA setup."""
+def dependency_pins(root, development=False):
+    """Read exact runtime and optional development versions from their canonical files."""
+    filenames = ["requirements.txt"]
+    if development:
+        filenames.append("requirements-dev.txt")
+    pins = {}
+    for filename in filenames:
+        for line in (Path(root) / filename).read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith(("#", "-r ")):
+                continue
+            match = re.fullmatch(r"([A-Za-z0-9_.-]+)==([A-Za-z0-9_.+-]+)", line)
+            if match is None:
+                raise ValueError(f"Expected an exact package pin in {filename}: {line}")
+            name, version = match.groups()
+            if name in pins and pins[name] != version:
+                raise ValueError(f"Conflicting dependency pin for {name}")
+            pins[name] = version
+    return pins
+
+
+def wheel_specification(device, system, root=None):
+    """Add official wheel build tags to the versions declared in requirements.txt."""
     if device not in ("cpu", "cuda"):
         raise ValueError("device must be cpu or cuda")
+    if system not in ("Linux", "Darwin", "Windows"):
+        raise ValueError(f"Unsupported operating system: {system}")
     if device == "cuda" and system != "Linux":
         raise ValueError("The CUDA benchmark environment is Linux; use --device cpu on this host")
-    build = "+cu126" if device == "cuda" else ("+cpu" if system == "Linux" else "")
-    index = (
-        "https://download.pytorch.org/whl/cu126"
-        if device == "cuda"
-        else "https://download.pytorch.org/whl/cpu"
-    )
-    return [f"torch==2.8.0{build}", f"torchvision==0.23.0{build}"], index
+    root = Path(root) if root is not None else Path(__file__).resolve().parent
+    pins = dependency_pins(root)
+    build = "+cu126" if device == "cuda" else ("" if system == "Darwin" else "+cpu")
+    index = f"https://download.pytorch.org/whl/{'cu126' if device == 'cuda' else 'cpu'}"
+    return [f"{name}=={pins[name]}{build}" for name in ("torch", "torchvision")], index
 
 
 def validate_prefix(prefix, root, base=None):
@@ -47,84 +95,29 @@ def validate_prefix(prefix, root, base=None):
     return prefix
 
 
-def install_environment(root, prefix, device, conda):
-    """Create Conda Python first, then install and verify official PyTorch wheel builds."""
-    root = Path(root).resolve()
-    packages, index = wheel_specification(device, platform.system())
-    environment = {
-        **os.environ,
-        "PIP_CACHE_DIR": str(root / ".cache" / "pip"),
-        "CONDA_PKGS_DIRS": str(root / ".cache" / "conda_pkgs"),
-        "PYTHONNOUSERSITE": "1",
-    }
-    environment.pop("PYTHONPATH", None)
-    environment.pop("PYTHONHOME", None)
-    base = subprocess.run(
-        [conda, "info", "--base"], check=True, env=environment, capture_output=True, text=True
-    ).stdout.strip()
-    prefix = validate_prefix(prefix, root, base)
-    if not prefix.exists():
-        subprocess.run(
-            [
-                conda,
-                "env",
-                "create",
-                "--yes",
-                "--prefix",
-                str(prefix),
-                "--file",
-                str(root / "environment.yml"),
-            ],
-            check=True,
-            env=environment,
-        )
-    executable = prefix / ("python.exe" if platform.system() == "Windows" else "bin/python")
-    subprocess.run(
-        [
-            str(executable),
-            "-c",
-            "import sys; assert sys.version_info[:2] == (3, 11), 'The recipe requires Conda Python 3.11'",
-        ],
-        check=True,
-        env=environment,
-    )
-    subprocess.run(
-        [str(executable), "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"],
-        check=True,
-        env=environment,
-    )
-    subprocess.run(
-        [str(executable), "-m", "pip", "install", *packages, "--index-url", index],
-        check=True,
-        env=environment,
-    )
-    subprocess.run(
-        [str(executable), "-m", "pip", "install", "-e", str(root)], check=True, env=environment
-    )
-    subprocess.run([str(executable), "-m", "pip", "check"], check=True, env=environment)
-    probe = "import json,sys,torch,torchvision; from pathlib import Path; p=Path(sys.prefix).resolve(); assert (p/'conda-meta'/'history').is_file(); assert Path(torch.__file__).resolve().is_relative_to(p); assert Path(torchvision.__file__).resolve().is_relative_to(p); print(json.dumps({'prefix':str(p),'python':sys.version.split()[0],'torch':torch.__version__,'torchvision':torchvision.__version__,'cuda_runtime':torch.version.cuda,'cuda_available':torch.cuda.is_available()}))"
-    result = subprocess.run(
-        [str(executable), "-c", probe], check=True, env=environment, capture_output=True, text=True
-    )
-    report = json.loads(result.stdout)
-    if (device == "cuda" and report["cuda_runtime"] != "12.6") or (
-        device == "cpu" and report["cuda_runtime"] is not None
-    ):
+def validate_runtime(report, prefix, device, system, root, development=False):
+    """Check exact wheel versions, dependency pins, Python, and the compiled CUDA runtime."""
+    if Path(report["prefix"]).resolve() != Path(prefix).resolve():
+        raise RuntimeError("The Python interpreter did not use the requested Conda environment")
+    if tuple(report["python"].split(".")[:2]) != ("3", "11"):
+        raise RuntimeError("The recipe requires Conda Python 3.11")
+    expected = dependency_pins(root, development)
+    packages, _ = wheel_specification(device, system, root)
+    expected.update(dict(package.split("==", 1) for package in packages))
+    for name, version in expected.items():
+        actual = report["dependencies"].get(name)
+        if actual != version:
+            raise RuntimeError(f"Expected {name}=={version}; installed version is {actual}")
+    for name in ("torch", "torchvision"):
+        if report[name] != expected[name]:
+            raise RuntimeError(f"Imported {name} version does not match its installed metadata")
+    expected_cuda = "12.6" if device == "cuda" else None
+    if report["cuda_runtime"] != expected_cuda:
         raise RuntimeError("Installed PyTorch build does not match the requested device")
-    report.update(
-        {
-            "environment_manager": "conda",
-            "requested_device": device,
-            "wheel_index": index,
-            "environment_yml_sha256": hashlib.sha256(
-                (root / "environment.yml").read_bytes()
-            ).hexdigest(),
-            "bootstrap_sha256": hashlib.sha256((root / "bootstrap.py").read_bytes()).hexdigest(),
-            "project_metadata_sha256": hashlib.sha256(
-                (root / "pyproject.toml").read_bytes()
-            ).hexdigest(),
-        }
-    )
+
+
+def write_verification(root, prefix, device, conda, executable, environment, report):
+    """Export the observed runtime and package lists without changing installed packages."""
     destination = root / "verification"
     destination.mkdir(parents=True, exist_ok=True)
     (destination / f"conda_{device}_setup.json").write_text(json.dumps(report, indent=2) + "\n")
@@ -144,19 +137,122 @@ def install_environment(root, prefix, device, conda):
         text=True,
     )
     (destination / f"{device}_environment_freeze.txt").write_text(frozen.stdout)
+
+
+def install_environment(root, prefix, device, conda, development=False, verify_only=False):
+    """Install requirements into dedicated Conda Python, or only verify an existing environment."""
+    root = Path(root).resolve()
+    system = platform.system()
+    _, index = wheel_specification(device, system, root)
+    requirements = root / f"requirements-{device}.txt"
+    environment = {
+        **os.environ,
+        "PIP_CACHE_DIR": str(root / ".cache" / "pip"),
+        "CONDA_PKGS_DIRS": str(root / ".cache" / "conda_pkgs"),
+        "PYTHONNOUSERSITE": "1",
+    }
+    environment.pop("PYTHONPATH", None)
+    environment.pop("PYTHONHOME", None)
+    base = subprocess.run(
+        [conda, "info", "--base"], check=True, env=environment, capture_output=True, text=True
+    ).stdout.strip()
+    prefix = validate_prefix(prefix, root, base)
+    if not prefix.exists():
+        if verify_only:
+            raise ValueError("--verify-only requires an existing Conda environment")
+        subprocess.run(
+            [
+                conda,
+                "env",
+                "create",
+                "--yes",
+                "--prefix",
+                str(prefix),
+                "--file",
+                str(root / "environment.yml"),
+            ],
+            check=True,
+            env=environment,
+        )
+    executable = prefix / ("python.exe" if system == "Windows" else "bin/python")
+    subprocess.run(
+        [
+            str(executable),
+            "-c",
+            "import sys; assert sys.version_info[:2] == (3, 11), 'The recipe requires Conda Python 3.11'",
+        ],
+        check=True,
+        env=environment,
+    )
+    if not verify_only:
+        command = [str(executable), "-m", "pip", "install", "-r", str(requirements)]
+        if development:
+            command.extend(["-r", str(root / "requirements-dev.txt")])
+        subprocess.run(command, check=True, env=environment)
+        subprocess.run(
+            [str(executable), "-m", "pip", "install", "--no-deps", "-e", str(root)],
+            check=True,
+            env=environment,
+        )
+    subprocess.run([str(executable), "-m", "pip", "check"], check=True, env=environment)
+    pins = dependency_pins(root, development)
+    result = subprocess.run(
+        [str(executable), "-c", RUNTIME_PROBE, json.dumps(list(pins))],
+        check=True,
+        env=environment,
+        capture_output=True,
+        text=True,
+    )
+    report = json.loads(result.stdout)
+    validate_runtime(report, prefix, device, system, root, development)
+    report.update(
+        {
+            "environment_manager": "conda",
+            "requested_device": device,
+            "development_dependencies_checked": development,
+            "verification_only": verify_only,
+            "wheel_index": index,
+            "requirements_file": requirements.name,
+            "requirements_sha256": {
+                path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+                for path in sorted(root.glob("requirements*.txt"))
+            },
+            "environment_yml_sha256": hashlib.sha256(
+                (root / "environment.yml").read_bytes()
+            ).hexdigest(),
+            "bootstrap_sha256": hashlib.sha256((root / "bootstrap.py").read_bytes()).hexdigest(),
+            "project_metadata_sha256": hashlib.sha256(
+                (root / "pyproject.toml").read_bytes()
+            ).hexdigest(),
+        }
+    )
+    write_verification(root, prefix, device, conda, executable, environment, report)
     return report
 
 
 def main():
-    """Install the selected build inside a dedicated Conda prefix without activation."""
+    """Install or verify the selected requirements inside a dedicated Conda prefix."""
     root = Path(__file__).resolve().parent
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--device", choices=("cpu", "cuda"), default="cuda")
     parser.add_argument("--prefix", type=Path, default=root / ".conda")
     parser.add_argument("--conda")
+    parser.add_argument("--dev", action="store_true", help="Include requirements-dev.txt")
+    parser.add_argument(
+        "--verify-only",
+        action="store_true",
+        help="Check an existing environment without installing",
+    )
     args = parser.parse_args()
     try:
-        result = install_environment(root, args.prefix, args.device, resolve_conda(args.conda))
+        result = install_environment(
+            root,
+            args.prefix,
+            args.device,
+            resolve_conda(args.conda),
+            development=args.dev,
+            verify_only=args.verify_only,
+        )
     except (ValueError, RuntimeError) as error:
         parser.exit(1, f"{error}\n")
     print(json.dumps(result, indent=2))

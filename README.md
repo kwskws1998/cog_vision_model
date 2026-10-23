@@ -8,17 +8,36 @@ The implementation targets **one 24 GB-class CUDA GPU**, using 224px images, a g
 
 ## Setup
 
-Use Linux with an NVIDIA GPU and a driver supporting the official PyTorch CUDA 12.6 build. Install Conda first; the supplied environment uses Python 3.11. Run the following from this project directory. The setup is Python automation over Conda; there are no shell scripts. Commands use an explicit prefix and require no activation.
+Use Conda with Python 3.11. For Linux CUDA, install the pinned CUDA 12.6 PyTorch build through the requirements file. Run this once from the project directory:
 
-```text
-python3 bootstrap.py --device cuda
+```bash
+(
+set -e
+set -o pipefail
+
+conda env create --prefix ./.conda --file environment.yml
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate "$PWD/.conda"
+
+python -m pip install -r requirements-cuda.txt
+python -m pip install --no-deps -e .
+python -m pip check
+python bootstrap.py --device cuda --verify-only
+)
+```
+
+For a CPU environment, substitute `requirements-cpu.txt` and `--device cpu`. Install `requirements-dev.txt` in that same environment to run Ruff. `requirements.txt` is the shared dependency list used by the package metadata; the CPU/CUDA files select the appropriate PyTorch build. Environment verification records actual package versions and checks import locations and the compiled CUDA runtime. GPU availability and full-batch fit are checked separately on the training machine.
+
+The optional automated equivalent is `python3 bootstrap.py --device cuda` (add `--dev` for development tools). It creates the dedicated Conda prefix, installs the same requirements, checks dependencies and exports environment records. It rejects the base environment. If `.conda` already exists, activate it and install/verify as needed instead of rerunning `conda env create`.
+
+```bash
 conda run --no-capture-output --prefix ./.conda python experiment.py check
 conda run --no-capture-output --prefix ./.conda python experiment.py smoke
 conda run --no-capture-output --prefix ./.conda python experiment.py pretrained-smoke
 conda run --no-capture-output --prefix ./.conda python experiment.py profile
 ```
 
-`bootstrap.py` creates the project-local **Conda** environment `.conda` from `environment.yml`, then installs the official PyTorch wheel build and pinned project dependencies inside it. Linux CUDA uses explicit `+cu126` wheel tags; Linux CPU uses `+cpu`. The script verifies the actual compiled CUDA runtime, rejects the Conda base environment, checks dependencies, and exports native Conda package specifications plus the pip package list. The environment itself is managed by Conda; PyTorch wheels are installed with that environment’s pip. CPU installation uses `python3 bootstrap.py --device cpu`; CPU execution supports the verification commands. The benchmark JSON intentionally requests CUDA and fails explicitly when CUDA is unavailable.
+For CIFAR/Tiny ImageNet classification, use the [configurable classification workflow](classification/README.md#server-execution), which includes explicit seed and hyperparameter flags, a dry-run preview, timestamped logs, and resume instructions.
 
 `profile` measures **ERM, RSC, and cue routing separately**, with the full training batch and the evaluation batch of 64. It materializes Adam state, performs three warmup and three measured optimizer steps per arm, and records peak allocated/reserved memory and GPU properties in `verification/cuda_memory.json`. Validation is included in the memory peak. A passing report is required before describing the configuration as verified on a 24 GB device. It profiles artificial inputs of the correct shape, not classification quality. Other processes can still consume GPU memory; use an otherwise free GPU. No automatic batch reduction changes the experiment.
 
@@ -100,6 +119,8 @@ To run the prespecified matrix without an exploratory target pilot:
 conda run --no-capture-output --prefix ./.conda python experiment.py matrix --seeds 0 1 2 --evaluate
 ```
 
+All training settings in the JSON can also be overridden with explicit kebab-case arguments. For example, use `--learning-rate 6e-5 --batch-per-domain 12 --eval-batch-size 48 --precision bf16 --steps 5000 --eval-every 200 --workers 4` on `train`, `matrix`, and `profile`. Boolean fields support both forms, such as `--freeze-bn` / `--no-freeze-bn`. JSON settings are loaded first, then explicit flags are applied, and the resulting complete recipe is validated and saved in run contracts. Use matching settings for profiling and training; a changed recipe or source requires a new run directory.
+
 This executes **36 runs sequentially**: four targets × three seeds × three methods. It completes every training run before accessing any target evaluation. Repeating the command resumes unfinished training and verifies/reuses completed selections and target artifacts without calling training again. Input seed order is canonicalized. The plan binds the dataset ID, and every arm’s initial weights are checked before target access. Omit `--evaluate` to finish all training while withholding target results.
 
 ```text
@@ -123,7 +144,7 @@ The report rejects incomplete or unmatched matrices. It saves target accuracies 
 | `SOURCES.md` | Word-for-word evidence and pinned repositories |
 | `verification/` | Actual machine-generated test and smoke reports |
 
-After generating the verification reports, `conda run --prefix ./.conda python audit.py` checks syntax, the primary recipe, pinned split blobs, and whether the evidence matches the current executable sources. `conda run --prefix ./.conda python bundle.py` creates a portable ZIP beside this project. The ZIP includes code, configs, references, docs, and verification reports; it excludes the Conda environment, pretrained cache, PACS images, and run checkpoints.
+After generating the verification reports, `conda run --prefix ./.conda python audit.py` checks syntax, the primary recipe, pinned split blobs, and whether the evidence matches the current executable sources. `conda run --prefix ./.conda python bundle.py` creates a portable full-project ZIP beside this project, including the classification and Office-Home workflows and shared requirements files. The ZIP includes code, configs, references, docs, and verification reports; it excludes the Conda environment, pretrained cache, PACS images, and run checkpoints.
 
 Run artifacts include `contract.json`, `environment.json`, `history.json`, `last.pt`, `best.pt`, `selection.json`, `summary.json`, `target_access.json`, `target_metrics.json`, and `target_predictions.pt`. `best.pt` is finalized only after the planned training steps. Target predictions retain image paths for paired analysis. The files provide reproducibility and accidental-change detection, not a tamper-proof security boundary against someone rewriting the whole record.
 

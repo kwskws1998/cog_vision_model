@@ -12,6 +12,7 @@ import torch
 
 from cue_routing.io import atomic_json, environment, file_hash, read_json
 
+from .arguments import add_study_arguments, load_study_arguments, study_preview
 from .config import MAIN_METHODS, recipe
 from .data import (
     load_manifest,
@@ -38,6 +39,8 @@ def require_conda():
 
 def check(root):
     """Run legacy and new tests together and record actual outcomes against current sources."""
+    from ohvision.fingerprint import source_hash as officehome_source_hash
+
     suite = unittest.TestSuite(
         [
             unittest.TestLoader().discover(str(root / directory))
@@ -47,6 +50,7 @@ def check(root):
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     report = {
         "source_sha256": source_hash(root),
+        "officehome_source_sha256": officehome_source_hash(root),
         "tests_run": result.testsRun,
         "failures": len(result.failures),
         "errors": len(result.errors),
@@ -203,23 +207,41 @@ def main(root):
     """Parse explicit stages and fail before benchmark creation when preflight is unavailable."""
     require_conda()
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "command", choices=("check", "prepare", "data-smoke", "profile", "study", "smoke")
-    )
-    parser.add_argument("--data-root", type=Path, default=root / "data/classification")
-    parser.add_argument("--runs-dir", type=Path, default=root / "runs/classification_v1")
-    parser.add_argument(
-        "--dataset",
-        choices=("all", "cifar100", "tiny_imagenet", "dominoes", "cifar100_c"),
-        default="all",
-    )
-    parser.add_argument("--download", action="store_true")
-    parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
-    parser.add_argument("--steps", type=int, default=1)
-    parser.add_argument("--workers", type=int, default=4)
+    commands = parser.add_subparsers(dest="command", required=True)
+    for name in ("check", "smoke"):
+        commands.add_parser(name)
+    for name in ("prepare", "data-smoke", "profile", "study", "plan"):
+        command = commands.add_parser(name)
+        command.add_argument("--data-root", type=Path, default=root / "data/classification")
+        if name in ("profile", "study", "plan"):
+            add_study_arguments(command, root)
+        if name in ("study", "plan"):
+            command.add_argument(
+                "--runs-dir", type=Path, default=root / "runs/classification_2seeds_v1"
+            )
+            if name == "study":
+                command.add_argument("--dry-run", action="store_true")
+        if name in ("prepare", "data-smoke", "profile"):
+            command.add_argument(
+                "--dataset",
+                choices=("all", "cifar100", "tiny_imagenet", "dominoes", "cifar100_c"),
+                default="all",
+            )
+        if name == "prepare":
+            command.add_argument("--download", action="store_true")
+        if name == "data-smoke":
+            command.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
+            command.add_argument("--steps", type=int, default=1)
     arguments = parser.parse_args()
-    if arguments.workers < 0:
-        parser.error("workers must be nonnegative")
+    settings = None
+    if arguments.command in ("profile", "study", "plan"):
+        try:
+            settings = load_study_arguments(arguments)
+        except (OSError, TypeError, ValueError) as error:
+            parser.error(str(error))
+    if arguments.command == "plan" or getattr(arguments, "dry_run", False):
+        print(json.dumps(study_preview(settings), indent=2))
+        return
     torch.set_num_threads(4)
     if arguments.command == "check":
         value = check(root)
@@ -233,11 +255,8 @@ def main(root):
     elif arguments.command == "smoke":
         value = smoke(root)
     elif arguments.command == "study":
-        if arguments.dataset != "all":
-            parser.error(
-                "The prespecified study includes both natural datasets and the mechanism task"
-            )
-        result = run_study(root, arguments.data_root, arguments.runs_dir, workers=arguments.workers)
+        print(json.dumps(study_preview(settings), indent=2), flush=True)
+        result = run_study(root, arguments.data_root, arguments.runs_dir, settings=settings)
         value = {
             "status": "complete",
             "benchmark_evidence": result["benchmark_evidence"],
@@ -255,7 +274,7 @@ def main(root):
         if arguments.command == "data-smoke":
             value = data_smoke(root, manifest, arguments.device, arguments.steps)
         else:
-            base = base_recipe(arguments.dataset, {"workers": arguments.workers, "debug": False})
+            base = base_recipe(arguments.dataset, settings)
             value = profile_dataset(
                 root,
                 manifest,

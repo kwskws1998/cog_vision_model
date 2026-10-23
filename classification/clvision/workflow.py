@@ -12,47 +12,34 @@ from filelock import FileLock
 from cue_routing.io import atomic_json, canonical_hash, file_hash, read_json, run_lock
 from cue_routing.metrics import classification_metrics
 
-from .config import CORRUPTIONS, MAIN_METHODS, MECHANISM_METHODS, recipe
+from .config import CORRUPTIONS, MAIN_METHODS, MECHANISM_METHODS
 from .data import ImageDataset, load_manifest
 from .engine import evaluate_corruptions, evaluate_run, train, verify_run
 from .identity import source_hash
 from .profile import profile_dataset, verify_profile
+from .settings import CANDIDATE_FIELDS, resolve_settings
 
 
 def base_recipe(dataset, settings):
-    """Keep debug reductions explicit and impossible to mistake for the full benchmark."""
-    updates = {"workers": settings["workers"]}
-    if settings["debug"]:
-        updates.update(
-            debug=True,
-            device="cpu",
-            precision="fp32",
-            epochs=2,
-            milestones=(1,),
-            batch_size=2,
-            eval_batch_size=4,
-            debug_max_batches=2,
-        )
-    return recipe(dataset, **updates)
+    """Resolve the same validated recipe for preflight, development, and study training."""
+    return resolve_settings(settings).recipe(dataset)
 
 
-def candidate_configs(base):
-    """Allocate exactly three validation-only trials to each tunable intervention."""
+def candidate_configs(base, settings=None):
+    """Allocate an explicitly matched validation-only budget to every tunable intervention."""
+    settings = resolve_settings(settings)
+    if base.dataset not in settings.development_candidates:
+        raise ValueError("Development candidates are defined only for natural-image datasets")
     result = []
-    for method, key, values in (
-        ("cue", "gate_tau", (0.05, 0.15, 0.3)),
-        ("fixed_global_local", "fixed_lambda", (0.1, 0.25, 0.5)),
-        (
-            "zipfls_dense2",
-            "zipf_lambda",
-            (0.03, 0.1, 0.3) if base.dataset == "cifar100" else (0.3, 1.0, 3.0),
-        ),
-    ):
+    for method, key in CANDIDATE_FIELDS.items():
+        values = settings.development_candidates[base.dataset][method]
         for index, value in enumerate(values):
             result.append(
                 (
                     f"{method}_candidate{index}",
-                    replace(base, method=method, seed=2027, **{key: value}).validate(),
+                    replace(
+                        base, method=method, seed=settings.development_seed, **{key: value}
+                    ).validate(),
                 )
             )
     return result
@@ -60,15 +47,14 @@ def candidate_configs(base):
 
 def choose_candidates(rows):
     """Select final-epoch validation accuracy, then lower NLL, then registered candidate order."""
+    counts = [sum(row["config"]["method"] == method for row in rows) for method in CANDIDATE_FIELDS]
+    if not counts[0] or len(set(counts)) != 1 or sum(counts) != len(rows):
+        raise ValueError("Each tunable method requires the same positive count of completed trials")
     selected = {}
     for method in ("cue", "fixed_global_local", "zipfls_dense2"):
         options = [
             (index, row) for index, row in enumerate(rows) if row["config"]["method"] == method
         ]
-        if len(options) != 3:
-            raise ValueError(
-                "Each tunable method requires exactly three completed development trials"
-            )
         if any(
             not all(math.isfinite(row["validation"][key]) for key in ("accuracy", "nll"))
             for _, row in options
@@ -86,12 +72,12 @@ def choose_candidates(rows):
     return selected
 
 
-def develop(root, manifest, directory, base):
-    """Freeze all nine score artifacts and never construct a final-test loader."""
+def develop(root, manifest, directory, base, settings=None):
+    """Freeze every registered development score and never construct a final-test loader."""
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     rows = []
-    for name, config in candidate_configs(base):
+    for name, config in candidate_configs(base, settings):
         run_dir = directory / name
         train(config, manifest, run_dir, root, phase="development", resume=run_dir.exists())
         contract, _, summary = verify_run(run_dir, root, config, manifest["dataset_id"], "")
@@ -170,26 +156,50 @@ def mechanism_specs(root, selection, base, seeds):
     ]
 
 
-def freeze_plan(study_dir, manifests, root, settings):
-    """Write the complete intended dataset/arm/seed scope before starting benchmark training."""
+def make_plan(manifests, root, settings):
+    """Resolve the full study recipe and every development trial before starting any training."""
+    settings = resolve_settings(settings)
+    bases = {
+        dataset: settings.recipe(dataset) for dataset in ("cifar100", "tiny_imagenet", "dominoes")
+    }
     plan = {
-        "schema": 1,
+        "schema": 2,
         "source_sha256": source_hash(root),
-        "settings": settings,
+        "settings": settings.to_dict(),
+        "resolved_recipes": {dataset: config.to_dict() for dataset, config in bases.items()},
+        "development_trials": {
+            dataset: [
+                {"name": name, "config": config.to_dict()}
+                for name, config in candidate_configs(bases[dataset], settings)
+            ]
+            for dataset in ("cifar100", "tiny_imagenet")
+        },
         "dataset_ids": {name: manifest["dataset_id"] for name, manifest in manifests.items()},
         "main_methods": list(MAIN_METHODS),
         "mechanism_methods": list(MECHANISM_METHODS),
-        "main_seeds": [0] if settings["debug"] else [0, 1, 2, 3, 4],
-        "mechanism_seeds": [0] if settings["debug"] else [0, 1, 2],
+        "main_seeds": list(settings.main_seeds),
+        "mechanism_seeds": list(settings.mechanism_seeds),
         "natural_datasets": ["cifar100", "tiny_imagenet"],
         "final_selection": "fixed_final_epoch",
-        "benchmark_evidence": not settings["debug"],
+        "benchmark_evidence": not settings.debug,
     }
+    return plan
+
+
+def check_plan(study_dir, plan):
+    """Refuse changed study settings or source before preflight or resumed training can run."""
     path = Path(study_dir) / "plan.json"
     if path.exists() and read_json(path) != plan:
         raise ValueError(
             "Study scope or source changed; resume cannot silently change the experiment"
         )
+
+
+def freeze_plan(study_dir, manifests, root, settings):
+    """Write complete settings, resolved recipes, and dataset/arm/seed scope before training."""
+    plan = make_plan(manifests, root, settings)
+    check_plan(study_dir, plan)
+    path = Path(study_dir) / "plan.json"
     atomic_json(path, plan)
     return plan
 
@@ -225,7 +235,7 @@ def seal_study(study_dir, root, plan, specs, manifests):
 
 
 def paired_summary(differences):
-    """Provide descriptive paired uncertainty without pretending five seeds establish broad superiority."""
+    """Describe paired differences without treating a pilot with few seeds as confirmation."""
     values = np.asarray(differences, dtype=np.float64)
     generator = np.random.default_rng(17011)
     resampled = generator.choice(values, size=(10000, len(values)), replace=True).mean(1)
@@ -291,7 +301,7 @@ def report(study_dir, root, specs, manifests, seal):
         "study_seal_sha256": canonical_hash(seal),
         "benchmark_evidence": seal["benchmark_evidence"],
         "datasets": {},
-        "uncertainty": "Paired seed differences; bootstrap intervals descriptive with only five seeds; no formal significance claim",
+        "uncertainty": "Pilot with few paired seeds; bootstrap intervals are descriptive and unstable; no formal significance claim",
     }
     tables = []
     for dataset in ("cifar100", "tiny_imagenet", "dominoes"):
@@ -456,17 +466,19 @@ def report(study_dir, root, specs, manifests, seal):
     return output
 
 
-def run_study(root, data_root, study_dir, debug=False, workers=4):
+def run_study(root, data_root, study_dir, debug=None, workers=None, settings=None):
     """Exclude concurrent classification jobs before either CUDA preflight or study training."""
     lock_path = Path(root) / ".cache/classification_device.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     with FileLock(str(lock_path), timeout=0):
-        return _run_study(root, data_root, study_dir, debug, workers)
+        return _run_study(root, data_root, study_dir, debug, workers, settings)
 
 
-def _run_study(root, data_root, study_dir, debug=False, workers=4):
+def _run_study(root, data_root, study_dir, debug=None, workers=None, settings=None):
     """Run development, freeze choices, train all matrices, then evaluate clean and corrupted tests."""
     root, data_root, study_dir = Path(root), Path(data_root), Path(study_dir)
+    settings = resolve_settings(settings, debug=debug, workers=workers)
+    debug = settings.debug
     manifests = {
         name: load_manifest(data_root / "manifests" / f"{name}.json", root_override=data_root)
         for name in ("cifar100", "tiny_imagenet", "dominoes")
@@ -475,7 +487,7 @@ def _run_study(root, data_root, study_dir, debug=False, workers=4):
         manifests["cifar100_c"] = load_manifest(
             data_root / "manifests" / "cifar100_c.json", root_override=data_root
         )
-    settings = {"debug": debug, "workers": workers}
+    check_plan(study_dir, make_plan(manifests, root, settings))
     if not debug:
         for dataset in ("cifar100", "tiny_imagenet", "dominoes"):
             base = base_recipe(dataset, settings)
@@ -487,7 +499,11 @@ def _run_study(root, data_root, study_dir, debug=False, workers=4):
         specs = []
         cifar_base = base_recipe("cifar100", settings)
         cifar_selection = develop(
-            root, manifests["cifar100"], study_dir / "development" / "cifar100", cifar_base
+            root,
+            manifests["cifar100"],
+            study_dir / "development" / "cifar100",
+            cifar_base,
+            settings,
         )
         mechanism = mechanism_specs(
             study_dir / "main",
@@ -511,7 +527,9 @@ def _run_study(root, data_root, study_dir, debug=False, workers=4):
             selection = (
                 cifar_selection
                 if dataset == "cifar100"
-                else develop(root, manifests[dataset], study_dir / "development" / dataset, base)
+                else develop(
+                    root, manifests[dataset], study_dir / "development" / dataset, base, settings
+                )
             )
             matrix = main_specs(study_dir / "main", selection, base, plan["main_seeds"])
             for index, (run_dir, config, selection_id, phase) in enumerate(matrix, start=1):

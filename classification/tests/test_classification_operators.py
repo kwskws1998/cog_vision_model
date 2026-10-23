@@ -175,7 +175,7 @@ class ClassificationOperatorTests(unittest.TestCase):
 
 
 class ClassificationConfigTests(unittest.TestCase):
-    """Protect the prespecified recipe and explicit debug boundary."""
+    """Protect validated editable recipes and the explicit debug boundary."""
 
     def test_roundtrip_and_dataset_defaults(self):
         """Preserve complete settings and select the declared Tiny auxiliary weight."""
@@ -185,12 +185,22 @@ class ClassificationConfigTests(unittest.TestCase):
         self.assertEqual(recipe("tiny_imagenet").zipf_aux_weight, 0.5)
 
     def test_invalid_or_silent_recipe_changes_rejected(self):
-        """NaNs, booleans-as-integers, invalid milestones, and smaller production batches fail."""
+        """Accept explicit production changes while rejecting invalid values and hidden reductions."""
+        customized = replace(
+            Config(), epochs=5, milestones=(2, 4), batch_size=64, label_smoothing=0.2
+        ).validate()
+        self.assertEqual(customized.epochs, 5)
+        self.assertEqual(customized.milestones, (2, 4))
+        self.assertEqual(customized.batch_size, 64)
+        self.assertEqual(customized.label_smoothing, 0.2)
+        self.assertEqual(Config.from_dict(customized.to_dict()), customized)
         for updates in (
             {"epochs": 5},
-            {"batch_size": 64},
+            {"batch_size": 1},
+            {"eval_batch_size": 0},
             {"seed": True},
             {"gate_tau": math.nan},
+            {"learning_rate": -0.1},
             {"milestones": (150, 100)},
             {"workers": -1},
             {"device": "cpu"},
