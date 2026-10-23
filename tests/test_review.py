@@ -112,8 +112,8 @@ class CondaReviewTests(unittest.TestCase):
 
     def test_explicit_build_tags(self):
         cuda, index = BOOTSTRAP.wheel_specification("cuda", "Linux")
-        self.assertEqual(cuda, ["torch==2.8.0+cu126", "torchvision==0.23.0+cu126"])
-        self.assertTrue(index.endswith("/cu126"))
+        self.assertEqual(cuda, ["torch==2.8.0+cu128", "torchvision==0.23.0+cu128"])
+        self.assertTrue(index.endswith("/cu128"))
         cpu, _ = BOOTSTRAP.wheel_specification("cpu", "Linux")
         self.assertEqual(cpu[0], "torch==2.8.0+cpu")
         mac, _ = BOOTSTRAP.wheel_specification("cpu", "Darwin")

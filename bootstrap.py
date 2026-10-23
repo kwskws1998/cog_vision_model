@@ -13,6 +13,7 @@ from pathlib import Path
 RUNTIME_PROBE = """
 import importlib.metadata
 import json
+import runpy
 import sys
 from pathlib import Path
 
@@ -23,16 +24,61 @@ prefix = Path(sys.prefix).resolve()
 assert (prefix / "conda-meta" / "history").is_file(), "A Conda environment is required"
 assert Path(torch.__file__).resolve().is_relative_to(prefix), "PyTorch is outside the environment"
 assert Path(torchvision.__file__).resolve().is_relative_to(prefix), "torchvision is outside the environment"
+bootstrap = runpy.run_path(sys.argv[3], run_name="environment_runtime_probe")
+cuda = bootstrap["probe_cuda_runtime"](torch, sys.argv[2])
 print(json.dumps({
     "prefix": str(prefix),
     "python": sys.version.split()[0],
     "torch": torch.__version__,
     "torchvision": torchvision.__version__,
     "cuda_runtime": torch.version.cuda,
-    "cuda_available": torch.cuda.is_available(),
+    **cuda,
     "dependencies": {name: importlib.metadata.version(name) for name in json.loads(sys.argv[1])},
 }))
 """
+
+
+def probe_cuda_runtime(torch, device):
+    """Exercise real CUDA kernels and convolution gradients only for a requested CUDA setup."""
+    report = {
+        "cuda_available": False,
+        "arch_list": [],
+        "device_name": None,
+        "device_capability": None,
+        "kernel_checked": False,
+        "kernel_test_passed": False,
+    }
+    if device != "cuda":
+        report["kernel_skip_reason"] = "CPU environment requested"
+        return report
+    report["cuda_available"] = bool(torch.cuda.is_available())
+    report["arch_list"] = list(torch.cuda.get_arch_list())
+    if not report["cuda_available"]:
+        report["kernel_skip_reason"] = "CUDA GPU unavailable; GPU execution remains unverified"
+        return report
+    report["kernel_checked"] = True
+    try:
+        index = torch.cuda.current_device()
+        report["device_name"] = torch.cuda.get_device_name(index)
+        report["device_capability"] = list(torch.cuda.get_device_capability(index))
+        target = f"cuda:{index}"
+        inputs = torch.ones((2, 3, 8, 8), device=target, requires_grad=True)
+        elementwise = (inputs * 2 + 1).sum()
+        convolution = torch.nn.Conv2d(3, 4, 3, padding=1).to(target)
+        loss = convolution(inputs).square().mean() + elementwise * 0.0001
+        loss.backward()
+        torch.cuda.synchronize(index)
+        tensors = [loss, inputs.grad, *(parameter.grad for parameter in convolution.parameters())]
+        if any(tensor is None or not torch.isfinite(tensor).all().item() for tensor in tensors):
+            raise RuntimeError(
+                "CUDA convolution forward/backward produced missing or nonfinite values"
+            )
+        if elementwise.item() != inputs.numel() * 3:
+            raise RuntimeError("CUDA elementwise kernel produced an incorrect result")
+        report["kernel_test_passed"] = True
+    except RuntimeError as error:
+        report["kernel_test_error"] = str(error)
+    return report
 
 
 def resolve_conda(value=None):
@@ -78,8 +124,8 @@ def wheel_specification(device, system, root=None):
         raise ValueError("The CUDA benchmark environment is Linux; use --device cpu on this host")
     root = Path(root) if root is not None else Path(__file__).resolve().parent
     pins = dependency_pins(root)
-    build = "+cu126" if device == "cuda" else ("" if system == "Darwin" else "+cpu")
-    index = f"https://download.pytorch.org/whl/{'cu126' if device == 'cuda' else 'cpu'}"
+    build = "+cu128" if device == "cuda" else ("" if system == "Darwin" else "+cpu")
+    index = f"https://download.pytorch.org/whl/{'cu128' if device == 'cuda' else 'cpu'}"
     return [f"{name}=={pins[name]}{build}" for name in ("torch", "torchvision")], index
 
 
@@ -111,9 +157,20 @@ def validate_runtime(report, prefix, device, system, root, development=False):
     for name in ("torch", "torchvision"):
         if report[name] != expected[name]:
             raise RuntimeError(f"Imported {name} version does not match its installed metadata")
-    expected_cuda = "12.6" if device == "cuda" else None
+    expected_cuda = "12.8" if device == "cuda" else None
     if report["cuda_runtime"] != expected_cuda:
         raise RuntimeError("Installed PyTorch build does not match the requested device")
+    if device == "cuda" and report["cuda_available"]:
+        if report.get("kernel_checked") is not True or report.get("kernel_test_passed") is not True:
+            detail = report.get("kernel_test_error", "CUDA kernels were not successfully checked")
+            raise RuntimeError(
+                f"CUDA kernel verification failed on {report.get('device_name')} "
+                f"(capability {report.get('device_capability')}; "
+                f"wheel architectures {report.get('arch_list')}): {detail}. "
+                "Install the pinned CUDA 12.8 requirements and verify NVIDIA driver compatibility."
+            )
+    elif report.get("kernel_checked") is not False or report.get("kernel_test_passed") is not False:
+        raise RuntimeError("CUDA execution cannot be verified without a requested, available GPU")
 
 
 def write_verification(root, prefix, device, conda, executable, environment, report):
@@ -196,13 +253,24 @@ def install_environment(root, prefix, device, conda, development=False, verify_o
         )
     subprocess.run([str(executable), "-m", "pip", "check"], check=True, env=environment)
     pins = dependency_pins(root, development)
-    result = subprocess.run(
-        [str(executable), "-c", RUNTIME_PROBE, json.dumps(list(pins))],
-        check=True,
-        env=environment,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        result = subprocess.run(
+            [
+                str(executable),
+                "-c",
+                RUNTIME_PROBE,
+                json.dumps(list(pins)),
+                device,
+                str(root / "bootstrap.py"),
+            ],
+            check=True,
+            env=environment,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as error:
+        detail = error.stderr or error.stdout or str(error)
+        raise RuntimeError(f"Environment runtime probe failed: {detail.strip()}") from error
     report = json.loads(result.stdout)
     validate_runtime(report, prefix, device, system, root, development)
     report.update(

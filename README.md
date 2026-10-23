@@ -8,7 +8,7 @@ The implementation targets **one 24 GB-class CUDA GPU**, using 224px images, a g
 
 ## Setup
 
-Use Conda with Python 3.11. For Linux CUDA, install the pinned CUDA 12.6 PyTorch build through the requirements file. Run this once from the project directory:
+Use Conda with Python 3.11. For Linux CUDA, install the pinned CUDA 12.8 PyTorch build through the requirements file. This supports the RTX 5090/Blackwell architecture that the previous CUDA 12.6 build did not support. Run this once from the project directory:
 
 ```bash
 (
@@ -26,7 +26,7 @@ python bootstrap.py --device cuda --verify-only
 )
 ```
 
-For a CPU environment, substitute `requirements-cpu.txt` and `--device cpu`. Install `requirements-dev.txt` in that same environment to run Ruff. `requirements.txt` is the shared dependency list used by the package metadata; the CPU/CUDA files select the appropriate PyTorch build. Environment verification records actual package versions and checks import locations and the compiled CUDA runtime. GPU availability and full-batch fit are checked separately on the training machine.
+For a CPU environment, substitute `requirements-cpu.txt` and `--device cpu`. Install `requirements-dev.txt` in that same environment to run Ruff. `requirements.txt` is the shared dependency list used by the package metadata; the CPU/CUDA files select the appropriate PyTorch build. Environment verification records actual package versions, import locations, the compiled CUDA runtime, and GPU architecture. When CUDA is available it also executes small GPU operations and convolution forward/backward before reporting success; GPU detection alone does not establish kernel compatibility. Full-batch fit is checked separately on the training machine. The official [PyTorch build list](https://pytorch.org/get-started/previous-versions/) provides the pinned 2.8.0/0.23.0 CUDA 12.8 pair, and the [Blackwell support announcement](https://pytorch.org/blog/pytorch-2-7/) documents CUDA 12.8 support.
 
 The optional automated equivalent is `python3 bootstrap.py --device cuda` (add `--dev` for development tools). It creates the dedicated Conda prefix, installs the same requirements, checks dependencies and exports environment records. It rejects the base environment. If `.conda` already exists, activate it and install/verify as needed instead of rerunning `conda env create`.
 
