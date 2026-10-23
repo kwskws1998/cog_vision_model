@@ -23,12 +23,13 @@ from cue_routing.io import (
 )
 from cue_routing.metrics import classification_metrics
 
-from .config import CORRUPTIONS, Config
+from .config import CORRUPTIONS, Config, learning_rate_for_epoch
 from .data import CorruptionDataset, load_manifest, make_loader
 from .identity import source_hash
 from .losses import training_objective
 from .models import SmallResNet18
 from .progress import duration, progress_event
+from .runtime import diagnostic_scalars, runtime_status, timed_batches
 
 
 def make_model(config):
@@ -47,10 +48,16 @@ def optimizer_for(model, config):
     """Use the same SGD rule for all shared trainable tensors."""
     return torch.optim.SGD(
         model.parameters(),
-        lr=config.learning_rate,
+        lr=learning_rate_for_epoch(config, 1),
         momentum=config.momentum,
         weight_decay=config.weight_decay,
     )
+
+
+def tensors_finite(tensors):
+    """Reduce finite checks on the device before a single host synchronization."""
+    checks = [torch.isfinite(value).all() for value in tensors]
+    return not checks or bool(torch.stack(checks).all())
 
 
 def validate_buffers(model):
@@ -84,9 +91,8 @@ def optimize_batch(model, optimizer, scaler, images, targets, config):
         validate_buffers(model)
         scaler.scale(loss).backward()
         scaler.unscale_(optimizer)
-        invalid = any(
-            parameter.grad is not None and not torch.isfinite(parameter.grad).all()
-            for parameter in model.parameters()
+        invalid = not tensors_finite(
+            parameter.grad for parameter in model.parameters() if parameter.grad is not None
         )
         if invalid:
             if not enabled:
@@ -107,7 +113,7 @@ def optimize_batch(model, optimizer, scaler, images, targets, config):
             )
         scaler.step(optimizer)
         scaler.update()
-        if not all(torch.isfinite(parameter).all() for parameter in model.parameters()):
+        if not tensors_finite(model.parameters()):
             raise FloatingPointError(
                 "Nonfinite updated parameters; resume from the last epoch checkpoint"
             )
@@ -117,8 +123,7 @@ def optimize_batch(model, optimizer, scaler, images, targets, config):
         ):
             raise RuntimeError("Peak CUDA reservation exceeds the prespecified budget")
         return {
-            "loss": float(loss.detach()),
-            **diagnostics,
+            **diagnostic_scalars(loss, diagnostics),
             "amp_overflow_retries": retries,
             "amp_scale": scaler.get_scale(),
         }
@@ -316,6 +321,7 @@ def train(
             if old != contract:
                 raise ValueError("Completed run identity differs from this requested run")
             summary = verify_run(run_dir, root, config, manifest["dataset_id"], selection_id)[2]
+            runtime_status(run_dir, config, "reused_completed_training", config.epochs)
             progress_event(run_dir, "train_complete")
             return summary
         optimizer = optimizer_for(model, config)
@@ -361,32 +367,43 @@ def train(
             summary = seal_run(
                 run_dir, contract, model.state_dict(), history, steps, previous_seconds
             )
+            runtime_status(run_dir, config, "training_complete", config.epochs)
             progress_event(run_dir, "train_complete")
             return summary
         if endpoint <= start:
             raise ValueError("Resume endpoint must follow the saved epoch")
         if config.device == "cuda":
             torch.cuda.reset_peak_memory_stats()
+        status = runtime_status(run_dir, config, "training_start", start + 1)
+        print(
+            f"[run] pid={status['pid']} directory={run_dir.resolve()} "
+            f"dataset={config.dataset} method={config.method} seed={config.seed} "
+            f"train_batch={config.batch_size} eval_batch={config.eval_batch_size} "
+            f"precision={config.precision}/{config.eval_precision} workers={config.workers} "
+            f"vram_ceiling={config.max_vram_gib:g} GiB",
+            flush=True,
+        )
         began = time.monotonic()
         progress_event(run_dir, "train_start", completed_epochs=start)
         last_progress = began
         for epoch in range(start + 1, endpoint + 1):
-            rate = config.learning_rate * config.lr_decay ** sum(
-                epoch > milestone for milestone in config.milestones
-            )
+            rate = learning_rate_for_epoch(config, epoch)
             for group in optimizer.param_groups:
                 group["lr"] = rate
             model.train()
             totals, count, images_seen, retries = {}, 0, 0, 0
             epoch_began = time.monotonic()
+            runtime_status(run_dir, config, "training", epoch)
+            loader_began = time.monotonic()
             loader = make_loader(manifest, config, "train", epoch)
-            for images, targets in loader:
+            timings = {"data_wait_seconds": time.monotonic() - loader_began}
+            for images, targets in timed_batches(loader, timings):
                 result = optimize_batch(
                     model,
                     optimizer,
                     scaler,
-                    images.to(config.device),
-                    targets.to(config.device),
+                    images.to(config.device, non_blocking=True),
+                    targets.to(config.device, non_blocking=True),
                     config,
                 )
                 for key, value in result.items():
@@ -406,6 +423,7 @@ def train(
                     progress_event(
                         run_dir, "train_batch", epoch=epoch, batch=count, batches=len(loader)
                     )
+                    runtime_status(run_dir, config, "training", epoch, batch=count)
                     last_progress = now
             if count == 0:
                 raise ValueError("Empty training epoch")
@@ -414,12 +432,16 @@ def train(
             ):
                 raise ValueError("Training epoch omitted or duplicated scheduled batches")
             train_seconds = time.monotonic() - epoch_began
+            timings["training_seconds"] = train_seconds
+            timings["step_and_host_seconds"] = max(0, train_seconds - timings["data_wait_seconds"])
+            runtime_status(run_dir, config, "validation", epoch)
             validation_began = time.monotonic()
             validation = evaluate_loader(
                 model, make_loader(manifest, config, "validation"), config
             )[0]
             validation = {key: value for key, value in validation.items() if key != "confusion"}
             validation_seconds = time.monotonic() - validation_began
+            timings["validation_seconds"] = validation_seconds
             elapsed = previous_seconds + time.monotonic() - began
             history.append(
                 {
@@ -432,6 +454,7 @@ def train(
                     "amp_overflow_retries_total": retries,
                     "validation": validation,
                     "training_images_per_second": images_seen / max(train_seconds, 1e-9),
+                    "timing": timings,
                     "elapsed_seconds": elapsed,
                     "vram": vram_stats(config),
                 }
@@ -447,11 +470,32 @@ def train(
                 "rng": capture_rng(config.device),
                 "contract_hash": canonical_hash(contract),
             }
+            runtime_status(run_dir, config, "checkpoint", epoch)
+            checkpoint_began = time.monotonic()
             atomic_torch(run_dir / "last.pt", checkpoint)
             atomic_json(run_dir / "history.json", history)
+            checkpoint_seconds = time.monotonic() - checkpoint_began
+            runtime_status(
+                run_dir,
+                config,
+                "epoch_complete",
+                epoch,
+                timing={**timings, "checkpoint_seconds": checkpoint_seconds},
+            )
             eta = (time.monotonic() - began) * (config.epochs - epoch) / (epoch - start)
+            memory = history[-1]["vram"].get("peak_reserved_gib")
+            memory_text = f"{memory:.2f} GiB" if memory is not None else "unmeasured"
             print(
                 f"{config.dataset} {config.method} seed={config.seed} epoch={epoch}/{config.epochs} val_accuracy={validation['accuracy']:.4f} loss={history[-1]['training']['loss']:.4f} elapsed={duration(elapsed)} run_remaining~={duration(eta)} elapsed_s={elapsed:.1f} eta_s={eta:.1f}",
+                flush=True,
+            )
+            print(
+                f"[performance] train_batch={config.batch_size} "
+                f"images/s={history[-1]['training_images_per_second']:.1f} "
+                f"data_wait={timings['data_wait_seconds']:.2f}s "
+                f"step_and_host={timings['step_and_host_seconds']:.2f}s "
+                f"validation={validation_seconds:.2f}s checkpoint={checkpoint_seconds:.2f}s "
+                f"peak_reserved={memory_text}",
                 flush=True,
             )
             progress_event(
@@ -471,8 +515,10 @@ def train(
                 steps,
                 previous_seconds + time.monotonic() - began,
             )
+            runtime_status(run_dir, config, "training_complete", config.epochs)
             progress_event(run_dir, "train_complete")
             return summary
+        runtime_status(run_dir, config, "interrupted_at_epoch_boundary", endpoint)
         return {
             "status": "interrupted_at_epoch_boundary",
             "completed_epochs": endpoint,
@@ -573,8 +619,10 @@ def evaluate_run(manifest, run_dir, root, study_seal):
             ):
                 raise ValueError("Previously evaluated artifacts changed")
             progress_event(run_dir, "clean_complete")
+            runtime_status(run_dir, Config.from_dict(contract["config"]), "reused_completed_test")
             return existing
         model, config, _, _ = load_final(run_dir, root, manifest)
+        runtime_status(run_dir, config, "final_test")
         record_access(run_dir, study_seal, "clean_test")
         loader = make_loader(manifest, config, "test")
         began = time.monotonic()
@@ -611,6 +659,7 @@ def evaluate_run(manifest, run_dir, root, study_seal):
         )
         result["prediction_sha256"] = file_hash(run_dir / "test_predictions.pt")
         atomic_json(artifact, result)
+        runtime_status(run_dir, config, "test_complete")
         progress_event(run_dir, "clean_complete", seconds=time.monotonic() - evaluation_began)
         return result
 

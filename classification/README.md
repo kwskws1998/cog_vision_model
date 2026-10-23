@@ -4,7 +4,78 @@ This directory implements CIFAR-100, CIFAR-100-C, native-64px Tiny ImageNet-200,
 
 The main comparison is ERM, uniform non-target label smoothing, fixed global-to-local self-distillation, Zipf's Label Smoothing dense2, and CUE. These are training interventions on a common small-image ResNet-18. Final inference is global average pooling and the shared final classifier. CUE does not adapt or choose cues during testing.
 
-## Server execution
+## CUE first on RTX 5090
+
+The recommended first run now trains only CUE. The two natural datasets with seeds 0 and 1 require **4 runs / 800 epochs**, instead of the full study's 50 runs / 8,200 epochs. There is no development grid, competitor training, dominoes task, or corruption evaluation in this mode. CUE coefficients are fixed before training.
+
+The editable preset is [`configs/cue_5090.json`](configs/cue_5090.json). It uses training batch 1,024, evaluation batch 2,048, BF16 training, FP32 evaluation, eight loader workers, and a **28 GiB peak-reserved memory ceiling**. This ceiling does not allocate or guarantee that amount of VRAM. Real CUE training/validation preflight checks each selected dataset at the declared batch sizes, and saves throughput and memory under the run's `preflight/` directory. An OOM or numerical failure stops before benchmark training without changing the batch.
+
+The larger batch changes optimization. This preset explicitly sets peak SGD LR 0.8 and five epochs of linear warmup: 0.16, 0.32, 0.48, 0.64, 0.8. It retains 200 epochs and decays after epochs 100 and 150. This is an unverified large-batch recipe, not an established accuracy-preserving speedup. Batch size, LR, and warmup are independent inputs; changing one does not silently change the others. Training retains deterministic kernels and exact epoch-boundary resume.
+
+Use the existing Conda environment and installed CUDA requirements; this mode adds no dependencies. For a new server, follow [the root setup instructions](../README.md#setup). If the old study is still running, stop it in its terminal before updating the source. Keep its run directory and start this different recipe in a new directory.
+
+If the natural-image manifests are already prepared, proceed directly to training. Otherwise, prepare only these two datasets:
+
+```bash
+python -u classification/experiment.py prepare --dataset cifar100 --download \
+  --data-root data/classification
+python -u classification/experiment.py prepare --dataset tiny_imagenet --download \
+  --data-root data/classification
+```
+
+Launch from Bash after putting the updated project files on the server:
+
+```bash
+(
+set -e
+set -o pipefail
+
+cd /workspace/cog_vision_model
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate "$PWD/.conda"
+mkdir -p results
+
+STAMP=$(date +%Y%m%d_%H%M%S)
+RUN_NAME="cue_only_5090_bf16_b1024_seeds0_1_${STAMP}"
+
+python -u classification/run.py cue \
+  --config classification/configs/cue_5090.json \
+  --data-root data/classification \
+  --runs-dir "runs/${RUN_NAME}" \
+  --datasets cifar100 tiny_imagenet \
+  --seeds 0 1 \
+  --epochs 200 \
+  --milestones 100 150 \
+  --batch-size 1024 \
+  --eval-batch-size 2048 \
+  --learning-rate 0.8 \
+  --warmup-epochs 5 \
+  --momentum 0.9 \
+  --weight-decay 1e-4 \
+  --lr-decay 0.1 \
+  --gate-tau 0.15 \
+  --gate-temperature 0.05 \
+  --joint-floor 0.5 \
+  --precision bf16 \
+  --eval-precision fp32 \
+  --device cuda \
+  --workers 8 \
+  --max-vram-gib 28 \
+  2>&1 | tee "results/${RUN_NAME}.log"
+)
+```
+
+Add `--dry-run` to preview the resolved settings and run count without data/CUDA access. Explicit CLI values override both common JSON settings and dataset overrides. To run just one job, use `--datasets cifar100 --seeds 0`. To resume, repeat the same command with the **original fixed `--runs-dir`**, identical settings, and unchanged source/environment; do not generate a new timestamp. Completed jobs and predictions are verified and reused.
+
+Every training job prints a `[run]` line containing its PID, actual batch sizes, precision, workers, and run directory. Each epoch prints `[performance]` with images/second, time waiting for data (including worker startup/teardown), step-and-host time, validation time, checkpoint time, and peak reserved VRAM. Step-and-host time includes transfers and Python work; it is not a CUDA-kernel-only measurement. `runtime_status.json` inside each individual run records the latest phase, PID, configuration, and current/peak allocator counters. A single `nvidia-smi` screenshot does not identify the recipe or establish sustained utilization. The memory ceiling does not force memory allocation.
+
+`progress.json` and console output include elapsed time, remaining time, expected finish time, run/epoch counts, and per-dataset timing coverage. Preflight supplies provisional rates; completed epochs replace them with observed rates. No fixed 5090 completion time is claimed before measurement. Final evaluation starts only after all requested training jobs are complete.
+
+Results are written to `comparison.json` and `comparison.md`. They include CUE accuracy by seed, mean and seed SD, and nine cited published reference methods. The reference data and exact paper excerpts are in [`references/published_classification.json`](references/published_classification.json). Those rows are labeled `published_reference`; only CUE rows are local measurements. The report records differences in backbone, input resolution, internal validation split, batch/LR, and seed count. Differences in percentage points are descriptive across protocols; there is no paired significance test or automatic superiority claim. Debug results are marked synthetic and omit accuracy-difference comparisons.
+
+The entrypoints call `clvision/cue_settings.py` for inputs, `clvision/cue_workflow.py` for orchestration/reporting, and the existing `clvision/engine.py` for training. The full controlled study remains available below when it is needed.
+
+## Full controlled study (optional)
 
 Run from the project directory, for example `/workspace/cog_vision_model`. Install the shared Conda environment using the [root setup instructions](../README.md#setup). The commands below use Bash and stop if any stage or a piped training process fails.
 
@@ -84,7 +155,7 @@ python -u classification/run.py train \
 )
 ```
 
-`--seeds` sets the main and mechanism seed lists together. `--main-seeds` and `--mechanism-seeds` override their respective lists if supplied; duplicate, empty, or out-of-range lists are rejected. The default remains seeds 0 and 1, with development seed 2027: 18 validation-candidate runs, 20 natural-image main runs, and 12 mechanism runs, totaling 50 training runs. Three seeds (`--seeds 0 1 2`) produce 66 runs with the default candidate grids. The preview calculates counts from your actual settings.
+`--seeds` sets the main and mechanism seed lists together. `--main-seeds` and `--mechanism-seeds` override their respective lists if supplied; duplicate, empty, or out-of-range lists are rejected. The default remains seeds 0 and 1, with development seed 2027: 18 validation-candidate runs, 20 natural-image main runs, and 12 mechanism runs, totaling 50 training runs and 8,200 epochs at the default schedules. The validation candidates each train for the full 200 epochs. Three seeds (`--seeds 0 1 2`) produce 66 runs with the default candidate grids. The preview calculates counts from your actual settings.
 
 Precedence is built-in defaults, JSON common training settings, JSON dataset-family schedules, JSON dataset overrides, then explicit CLI flags. Natural-image `--epochs`/`--milestones` and mechanism `--mechanism-epochs`/`--mechanism-milestones` are separate. Supply compatible milestones when changing epochs; `--milestones` with no values disables the natural-image milestone schedule. Validation grids and dataset-specific coefficients can be edited in JSON; each dataset keeps an equal positive candidate budget across the three tuned methods.
 
@@ -94,7 +165,9 @@ Training precision (`--precision`, default `fp16`) and evaluation precision (`--
 
 Preflight failures retain `status=failed`, the dataset, method, stage, accepted update count, resolved recipe, and exception in `classification/verification/<dataset>_cuda.json`. Evaluation reports nonfinite logits separately from invalid label IDs and includes input/model-state diagnostics. Corrupted floating-point model buffers stop training before an optimizer update is accepted. Partially consumed preflight data loaders are shut down on failure so their worker/pin-memory errors do not obscure the original error. These checks do not clamp or replace invalid predictions.
 
-Timing is automatic. Preflight prints training/evaluation throughput for each dataset and method. Before the first full training run, `[study]` prints a provisional whole-study ETA based on those measurements. It includes development, all main/mechanism epochs, per-epoch validation, clean tests, mechanism panel diagnostics, and all 750 CIFAR-100-C checkpoint/condition evaluations under the default two-seed scope. Actual epoch times, including checkpoint writes, replace provisional rates as training proceeds; measured final evaluation times refine that stage's estimate. Startup, final sealing, report generation, and downtime are not predicted. An unavailable measurement is shown as `estimating`, never an invented duration.
+Timing is automatic. Preflight prints warmed training/evaluation throughput for each dataset and method. All ten training updates are checked, but the first five are excluded from throughput timing. Evaluation warms up on the first full batch, then times up to ten batches, reusing that first batch once and streaming the rest. Loader construction and first-fetch time are recorded separately and charged once per estimated pass, rather than multiplied across every batch. Before the first full training run, `[study]` prints a provisional whole-study ETA based on those measurements. It includes development, all main/mechanism epochs, per-epoch validation, clean tests, mechanism panel diagnostics, and all 750 CIFAR-100-C checkpoint/condition evaluations under the default two-seed scope. Actual epoch times, including checkpoint writes, replace provisional rates as training proceeds; measured final evaluation times refine that stage's estimate. Final sealing, report generation, and downtime are not predicted. An unavailable measurement is shown as `estimating`, never an invented duration.
+
+The `epoch_rates=observed/pending` counter reports how many remaining dataset/method groups have complete-epoch timing. For example, `1/16` means only one group's training rate has been calibrated with actual epochs; the other fifteen still use preflight. `progress.json` includes `estimated_remaining_by_dataset` and `provisional_training_timing_groups` so an unobserved dataset cannot silently dominate an apparently settled total. Full-epoch calibration for CIFAR does not calibrate Tiny ImageNet or final corruption evaluation. A short active-run ETA and a much larger provisional study ETA describe different scopes.
 
 Every completed epoch prints the active run's elapsed/remaining time and a whole-study line with completed runs, clean evaluations, corruption cells, session elapsed time, remaining time, and estimated finish in KST (`+09:00`). Long training epochs also print batch progress approximately every 30 seconds, after a batch completes. The current snapshot is saved atomically to `runs/<RUN_NAME>/progress.json`; completed jobs/epochs/corruption cells are recovered when resuming. Once preflight succeeds and the progress tracker starts, failures are recorded as `status=failed`; successful completion records the actual session duration and `status=complete`. A real RTX 5090 duration becomes available after its preflight; CPU smoke timing is not a GPU estimate.
 

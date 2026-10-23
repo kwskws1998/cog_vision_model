@@ -72,7 +72,12 @@ class StudyProgress:
                 0 if phase == "development" else test_n * (6 if dataset == "dominoes" else 1)
             )
             corruption_n = (
-                75 if dataset == "cifar100" and phase == "main" and not config["debug"] else 0
+                75
+                if dataset == "cifar100"
+                and phase == "main"
+                and not config["debug"]
+                and plan.get("evaluate_corruptions", True)
+                else 0
             )
             folder = self.directory / key
             history = (
@@ -96,6 +101,7 @@ class StudyProgress:
                 "train_images": train_n,
                 "validation_images": len(splits["validation"]),
                 "clean_images": evaluation_n,
+                "clean_passes": (3 if dataset == "dominoes" else 1) if evaluation_n else 0,
                 "clean_done": (folder / "test_metrics.json").exists(),
                 "corruption_cells": corruption_n,
                 "corruption_done": min(corruption_n, len(cells)),
@@ -107,6 +113,8 @@ class StudyProgress:
                 self.rates[rate_key] = {
                     "train_images_per_second": profile.get("training_images_per_second"),
                     "eval_images_per_second": profile.get("evaluation_images_per_second"),
+                    "train_startup_seconds": profile.get("training_loader_startup_seconds", 0),
+                    "eval_startup_seconds": profile.get("evaluation_loader_startup_seconds", 0),
                     "epochs": [],
                 }
             if history and history[-1].get("elapsed_seconds", 0) > 0 and epochs_done > 0:
@@ -147,6 +155,7 @@ class StudyProgress:
                 rate["eval_images_per_second"] = (
                     job["validation_images"] / values["validation_seconds"]
                 )
+                rate["eval_startup_seconds"] = 0
         elif event == "train_complete":
             job.update(epochs_done=job["epochs"], complete=True)
             self.active_batch = None
@@ -154,6 +163,7 @@ class StudyProgress:
             job["clean_done"] = True
             if values.get("seconds", 0) > 0:
                 rate["eval_images_per_second"] = job["clean_images"] / values["seconds"]
+                rate["eval_startup_seconds"] = 0
         elif event == "corruption_cell":
             job["corruption_done"] = values["completed_cells"]
             if values.get("seconds", 0) > 0:
@@ -162,19 +172,33 @@ class StudyProgress:
 
     def estimate(self):
         """Sum remaining training, validation, clean diagnostics, and corruption evaluation work."""
+        result = self.estimate_breakdown()
+        return result["training"], result["evaluation"], result["unknown"]
+
+    def estimate_breakdown(self):
+        """Expose dataset costs and which pending training groups have actual full-epoch timing."""
         training, evaluation, unknown = 0.0, 0.0, set()
+        datasets, pending_groups, observed_groups = {}, set(), set()
         for key, job in self.jobs.items():
-            rate = self.rates[(job["dataset"], job["method"])]
+            rate_key = (job["dataset"], job["method"])
+            rate = self.rates[rate_key]
+            dataset = datasets.setdefault(job["dataset"], {"training": 0.0, "evaluation": 0.0})
+            job_training, job_evaluation = 0.0, 0.0
             remaining_epochs = max(0, job["epochs"] - job["epochs_done"])
             eval_rate = rate["eval_images_per_second"]
+            eval_startup = rate["eval_startup_seconds"]
             if remaining_epochs:
+                pending_groups.add(rate_key)
                 epoch_seconds = None
                 if rate["epochs"]:
                     epoch_seconds = statistics.mean(rate["epochs"][-5:])
+                    observed_groups.add(rate_key)
                 elif rate["train_images_per_second"] and eval_rate:
                     epoch_seconds = (
                         job["train_images"] / rate["train_images_per_second"]
                         + job["validation_images"] / eval_rate
+                        + rate["train_startup_seconds"]
+                        + eval_startup
                     )
                 else:
                     unknown.add(f"{job['dataset']}/{job['method']}:training")
@@ -183,26 +207,65 @@ class StudyProgress:
                     if key == self.active and self.active_batch:
                         train_seconds = rate.get("train_epoch_seconds")
                         if train_seconds is None and rate["train_images_per_second"]:
-                            train_seconds = job["train_images"] / rate["train_images_per_second"]
+                            train_seconds = (
+                                job["train_images"] / rate["train_images_per_second"]
+                                + rate["train_startup_seconds"]
+                            )
                         if train_seconds is not None:
                             fraction = min(
                                 1, self.active_batch["batch"] / self.active_batch["batches"]
                             )
                             pending -= min(train_seconds, epoch_seconds) * fraction
-                    training += max(0, pending)
+                    job_training = max(0, pending)
             if job["clean_images"] and not job["clean_done"]:
                 if eval_rate:
-                    evaluation += job["clean_images"] / eval_rate
+                    job_evaluation += (
+                        job["clean_images"] / eval_rate + job["clean_passes"] * eval_startup
+                    )
                 else:
                     unknown.add(f"{job['dataset']}/{job['method']}:evaluation")
             cells = job["corruption_cells"] - job["corruption_done"]
             if cells:
                 corruption_rate = rate.get("corruption_images_per_second") or eval_rate
                 if corruption_rate:
-                    evaluation += cells * job["cell_images"] / corruption_rate
+                    startup = 0 if rate.get("corruption_images_per_second") else eval_startup
+                    job_evaluation += cells * (job["cell_images"] / corruption_rate + startup)
                 else:
                     unknown.add(f"{job['dataset']}/{job['method']}:corruptions")
-        return training, evaluation, sorted(unknown)
+            training += job_training
+            evaluation += job_evaluation
+            dataset["training"] += job_training
+            dataset["evaluation"] += job_evaluation
+        return {
+            "training": training,
+            "evaluation": evaluation,
+            "unknown": sorted(unknown),
+            "datasets": {
+                name: {
+                    "training_seconds": value["training"]
+                    if not any(
+                        item.startswith(name + "/") and item.endswith(":training")
+                        for item in unknown
+                    )
+                    else None,
+                    "evaluation_seconds": value["evaluation"]
+                    if not any(
+                        item.startswith(name + "/") and not item.endswith(":training")
+                        for item in unknown
+                    )
+                    else None,
+                    "total_seconds": sum(value.values())
+                    if not any(item.startswith(name + "/") for item in unknown)
+                    else None,
+                }
+                for name, value in datasets.items()
+            },
+            "pending_training_groups": len(pending_groups),
+            "observed_training_groups": len(observed_groups),
+            "provisional_training_groups": [
+                "/".join(key) for key in sorted(pending_groups - observed_groups)
+            ],
+        }
 
     def emit(self, force=False, error=None):
         """Write a current progress snapshot and a human-readable line at least every 30 training seconds."""
@@ -210,7 +273,12 @@ class StudyProgress:
         if not force and now - self.last_emit < 30:
             return
         self.last_emit = now
-        training, evaluation, unknown = self.estimate()
+        details = self.estimate_breakdown()
+        training, evaluation, unknown = (
+            details["training"],
+            details["evaluation"],
+            details["unknown"],
+        )
         remaining = None if unknown else training + evaluation
         if self.status == "complete":
             remaining = 0.0
@@ -247,8 +315,12 @@ class StudyProgress:
             else None,
             "estimated_remaining_seconds": remaining,
             "estimated_finish_kst": finish,
+            "estimated_remaining_by_dataset": details["datasets"],
+            "pending_training_timing_groups": details["pending_training_groups"],
+            "observed_training_timing_groups": details["observed_training_groups"],
+            "provisional_training_timing_groups": details["provisional_training_groups"],
             "unmeasured_rates": unknown,
-            "timing_basis": "Per-dataset/method preflight throughput, refined by completed epochs and evaluations; provisional until measured. Epoch observations include validation/checkpoint writes. Startup, final sealing, reporting, and downtime are not predicted.",
+            "timing_basis": "Warmed preflight throughput plus loader startup once per pass; provisional for groups without complete epochs. Full-epoch observations replace preflight and include validation/checkpoint writes. Final sealing, reporting, and downtime are not predicted. Final evaluation rates remain estimates until those evaluations run.",
             "jobs": self.jobs,
             "error": error,
         }
@@ -257,6 +329,7 @@ class StudyProgress:
             f"[study] stage={self.stage} runs={done}/{len(self.jobs)} "
             f"clean={clean_done}/{len(clean_jobs)} corruptions={cells_done}/{cells_total} "
             f"elapsed={duration(now - self.started)} remaining~={duration(remaining)} "
+            f"epoch_rates={details['observed_training_groups']}/{details['pending_training_groups']} "
             f"finish_KST~={finish or 'estimating'} active={self.active or 'none'}",
             flush=True,
         )

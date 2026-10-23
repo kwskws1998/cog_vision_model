@@ -208,9 +208,9 @@ def freeze_plan(study_dir, manifests, root, settings):
 
 def seal_study(study_dir, root, plan, specs, manifests):
     """Validate every planned main/mechanism run before granting any final-test access."""
-    expected = len(plan["main_seeds"]) * len(MAIN_METHODS) * 2 + len(plan["mechanism_seeds"]) * len(
-        MECHANISM_METHODS
-    )
+    expected = len(plan["main_seeds"]) * len(plan.get("main_methods", MAIN_METHODS)) * len(
+        plan.get("natural_datasets", ("cifar100", "tiny_imagenet"))
+    ) + len(plan["mechanism_seeds"]) * len(plan.get("mechanism_methods", MECHANISM_METHODS))
     if len(specs) != expected or len({str(row[0].resolve()) for row in specs}) != expected:
         raise ValueError("Study matrix omitted or duplicated a prespecified run")
     runs = {}

@@ -58,12 +58,12 @@ def consistency_loss(local_logits, areas, targets, config):
     regularizer = (areas[None] * (1 - gates) * local_kl).sum(1).mean()
     global_ce = F.cross_entropy(joint, targets)
     diagnostics = {
-        "global_ce": float(global_ce.detach()),
-        "local_consistency": float(regularizer.detach()),
-        "joint_fraction": float((gates * areas[None]).sum(1).mean()),
-        "gate_min": float(gates.min()),
-        "gate_max": float(gates.max()),
-        "disagreement": float((disagreement * areas[None]).sum(1).mean()),
+        "global_ce": global_ce.detach(),
+        "local_consistency": regularizer.detach(),
+        "joint_fraction": (gates * areas[None]).sum(1).mean().detach(),
+        "gate_min": gates.min().detach(),
+        "gate_max": gates.max().detach(),
+        "disagreement": (disagreement * areas[None]).sum(1).mean().detach(),
     }
     return global_ce + regularizer, joint, diagnostics
 
@@ -82,8 +82,8 @@ def training_objective(model, images, targets, config):
             + config.zipf_lambda * distillation
         )
         diagnostics = {
-            "zipf_kl": float(distillation.detach()),
-            "auxiliary_ce": float(auxiliary_ce.detach()),
+            "zipf_kl": distillation.detach(),
+            "auxiliary_ce": auxiliary_ce.detach(),
         }
     elif config.method in ("erm", "label_smoothing"):
         logits = model.readout(final)
@@ -100,5 +100,5 @@ def training_objective(model, images, targets, config):
     else:
         local_logits, areas = model.readout.cue_logits(final)
         loss, logits, diagnostics = consistency_loss(local_logits, areas, targets, config)
-    diagnostics["train_accuracy"] = float(logits.detach().argmax(1).eq(targets).float().mean())
+    diagnostics["train_accuracy"] = logits.detach().argmax(1).eq(targets).float().mean()
     return loss, diagnostics

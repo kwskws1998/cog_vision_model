@@ -5,6 +5,7 @@ import hashlib
 import time
 from contextlib import ExitStack, contextmanager
 from dataclasses import replace
+from itertools import chain, islice
 
 import torch
 
@@ -48,7 +49,9 @@ def profile_iterator(loader):
 
 
 def profile_method(manifest, config, steps, activity):
-    """Measure one intervention and retain its failure stage without retaining live workers."""
+    """Separate loader startup and warmup from steady throughput while retaining all safety checks."""
+    if steps < 10:
+        raise ValueError("At least 10 accepted real-data updates are required for timing")
     validate_device(config)
     validate_device(replace(config, precision=config.eval_precision))
     gc.collect()
@@ -60,14 +63,19 @@ def profile_method(manifest, config, steps, activity):
     before = next(model.parameters()).detach().clone()
     optimizer = optimizer_for(model, config)
     scaler = torch.amp.GradScaler("cuda", enabled=config.precision == "fp16")
-    loader = make_loader(manifest, config, "train", epoch=1)
     first_batch = None
     model.train()
     activity["stage"] = "training"
+    warmup_steps = 5
+    measured_images = 0
+    loader_began = time.monotonic()
+    loader = make_loader(manifest, config, "train", epoch=1)
     with ExitStack() as stack:
         iterator = stack.enter_context(profile_iterator(loader))
-        began = time.monotonic()
         for index in range(steps):
+            if index == warmup_steps:
+                torch.cuda.synchronize()
+                began = time.monotonic()
             try:
                 images, labels = next(iterator)
             except StopIteration:
@@ -76,6 +84,7 @@ def profile_method(manifest, config, steps, activity):
             if len(images) != config.batch_size:
                 raise ValueError("Preflight requires the full declared training batch")
             if index == 0:
+                training_startup = time.monotonic() - loader_began
                 first_batch = canonical_hash(
                     {
                         "images": hashlib.sha256(images.numpy().tobytes()).hexdigest(),
@@ -83,18 +92,31 @@ def profile_method(manifest, config, steps, activity):
                     }
                 )
             diagnostics = optimize_batch(
-                model, optimizer, scaler, images.to(config.device), labels.to(config.device), config
+                model,
+                optimizer,
+                scaler,
+                images.to(config.device, non_blocking=True),
+                labels.to(config.device, non_blocking=True),
+                config,
             )
             activity["accepted_optimizer_steps"] = index + 1
+            if index >= warmup_steps:
+                measured_images += len(images)
         torch.cuda.synchronize()
         seconds = time.monotonic() - began
     activity["stage"] = "validation"
-    evaluation_began = time.monotonic()
+    loader_began = time.monotonic()
     with profile_iterator(make_loader(manifest, config, "validation")) as iterator:
         validation_batch = next(iterator)
+        evaluation_startup = time.monotonic() - loader_began
         if len(validation_batch[0]) != config.eval_batch_size:
             raise ValueError("Preflight requires the full declared evaluation batch")
         evaluate_loader(model, [validation_batch], config)
+        torch.cuda.synchronize()
+        evaluation_began = time.monotonic()
+        metrics, _, _ = evaluate_loader(
+            model, chain((validation_batch,), islice(iterator, 9)), config
+        )
         torch.cuda.synchronize()
         evaluation_seconds = time.monotonic() - evaluation_began
     return {
@@ -103,16 +125,35 @@ def profile_method(manifest, config, steps, activity):
         "first_augmented_batch_sha256": first_batch,
         "accepted_optimizer_steps": steps,
         "backbone_updated": not torch.equal(before, next(model.parameters()).detach()),
-        "training_images_per_second": steps * config.batch_size / max(seconds, 1e-9),
-        "evaluation_images_per_second": len(validation_batch[0]) / max(evaluation_seconds, 1e-9),
+        "training_images_per_second": measured_images / max(seconds, 1e-9),
+        "training_loader_startup_seconds": training_startup,
+        "training_warmup_steps": warmup_steps,
+        "training_measured_steps": steps - warmup_steps,
+        "training_measured_images": measured_images,
+        "evaluation_images_per_second": metrics["n"] / max(evaluation_seconds, 1e-9),
+        "evaluation_loader_startup_seconds": evaluation_startup,
+        "evaluation_warmup_batches": 1,
+        "evaluation_measured_images": metrics["n"],
+        "evaluation_reuses_first_batch_after_warmup": True,
         "vram": vram_stats(config),
         "last_diagnostics": diagnostics,
         "training_parameters": sum(parameter.numel() for parameter in model.parameters()),
     }
 
 
-def profile_dataset(root, manifest, base_config, destination, steps=10):
+def selected_methods(config, methods):
+    """Allow an explicit subset without silently profiling unrelated training interventions."""
+    available = MECHANISM_METHODS if config.dataset == "dominoes" else MAIN_METHODS
+    if methods is None:
+        return available
+    if not methods or len(set(methods)) != len(methods) or set(methods) - set(available):
+        raise ValueError("Preflight methods must be a nonempty unique supported subset")
+    return tuple(methods)
+
+
+def profile_dataset(root, manifest, base_config, destination, steps=10, methods=None):
     """Use actual train/validation images, SGD momentum, AMP, and every selected intervention."""
+    methods = selected_methods(base_config, methods)
     result = {
         "source_sha256": source_hash(root),
         "dataset_id": manifest["dataset_id"],
@@ -132,10 +173,10 @@ def profile_dataset(root, manifest, base_config, destination, steps=10):
         return result
     if steps < 10:
         raise ValueError("At least 10 accepted real-data CUDA updates are required")
-    methods = MECHANISM_METHODS if base_config.dataset == "dominoes" else MAIN_METHODS
     for method in methods:
         print(
             f"[preflight] {base_config.dataset} {method}: {steps} GPU updates "
+            f"train_batch={base_config.batch_size} eval_batch={base_config.eval_batch_size} "
             f"train_precision={base_config.precision} eval_precision={base_config.eval_precision}",
             flush=True,
         )
@@ -192,9 +233,9 @@ def profile_dataset(root, manifest, base_config, destination, steps=10):
     return result
 
 
-def verify_profile(value, root, manifest, base_config):
+def verify_profile(value, root, manifest, base_config, methods=None):
     """Reject unmeasured, stale, changed-device, or reduced-batch CUDA preflight evidence."""
-    methods = MECHANISM_METHODS if base_config.dataset == "dominoes" else MAIN_METHODS
+    methods = selected_methods(base_config, methods)
     if (
         not value.get("measured")
         or not value.get("passes_budget")

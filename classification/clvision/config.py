@@ -45,6 +45,7 @@ class Config:
     batch_size: int = 128
     eval_batch_size: int = 128
     learning_rate: float = 0.1
+    warmup_epochs: int = 0
     momentum: float = 0.9
     weight_decay: float = 1e-4
     milestones: tuple = (100, 150)
@@ -77,6 +78,7 @@ class Config:
             "eval_batch_size",
             "workers",
             "debug_max_batches",
+            "warmup_epochs",
         ):
             value = getattr(self, key)
             if type(value) is not int or value < (
@@ -87,6 +89,8 @@ class Config:
             raise ValueError("Invalid seed or debug flag")
         if self.batch_size < 2:
             raise ValueError("Training BatchNorm requires a batch size of at least two")
+        if self.warmup_epochs >= self.epochs:
+            raise ValueError("Warmup must end before the final training epoch")
         if (
             not isinstance(self.milestones, tuple)
             or any(
@@ -95,6 +99,8 @@ class Config:
             or tuple(sorted(set(self.milestones))) != self.milestones
         ):
             raise ValueError("Milestones must be unique, sorted, and within the training schedule")
+        if self.milestones and self.warmup_epochs > self.milestones[0]:
+            raise ValueError("Warmup must end before the first learning-rate decay")
         for key in (
             "learning_rate",
             "momentum",
@@ -123,9 +129,7 @@ class Config:
         if not (self.zipf_lambda >= 0 and self.zipf_aux_weight >= 0 and self.zipf_power > 0):
             raise ValueError("Invalid Zipf coefficients")
         if not (
-            0 <= self.label_smoothing < 1
-            and 0 < self.max_vram_gib <= 24
-            and self.gradient_clip >= 0
+            0 <= self.label_smoothing < 1 and 0 < self.max_vram_gib and self.gradient_clip >= 0
         ):
             raise ValueError("Invalid smoothing, clipping, or memory settings")
         if self.device not in ("cpu", "cuda") or self.precision not in ("fp32", "fp16", "bf16"):
@@ -158,6 +162,18 @@ class Config:
     def load(cls, path):
         """Read and validate a saved experiment configuration."""
         return cls.from_dict(json.loads(Path(path).read_text()))
+
+
+def learning_rate_for_epoch(config, epoch):
+    """Use explicit linear epoch warmup followed by the registered milestone schedule."""
+    if not 1 <= epoch <= config.epochs:
+        raise ValueError("Learning-rate epoch is outside the declared schedule")
+    warmup = min(1.0, epoch / config.warmup_epochs) if config.warmup_epochs else 1.0
+    return (
+        config.learning_rate
+        * warmup
+        * config.lr_decay ** sum(epoch > milestone for milestone in config.milestones)
+    )
 
 
 def recipe(dataset, **overrides):

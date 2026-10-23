@@ -148,6 +148,7 @@ class StudySettings:
                 precision="fp32",
                 eval_precision="fp32",
                 epochs=2,
+                warmup_epochs=0,
                 milestones=(1,),
                 batch_size=2,
                 eval_batch_size=4,

@@ -152,3 +152,59 @@ class StudyProgressTests(unittest.TestCase):
         """Human-readable times retain hours beyond one day and distinguish unknown time."""
         self.assertEqual(duration(None), "estimating")
         self.assertEqual(duration(90061), "25h01m01s")
+
+    def test_loader_startup_is_charged_once_per_pass_and_not_after_epoch_calibration(self):
+        """Fixed initialization cost must not be multiplied by every image or batch."""
+        self.profiles["cifar100"]["methods"]["erm"].update(
+            training_loader_startup_seconds=100, evaluation_loader_startup_seconds=200
+        )
+        tracker = self.tracker()
+        self.assertEqual(tracker.estimate(), (6280, 15352, []))
+        with contextlib.redirect_stdout(io.StringIO()):
+            tracker.update(
+                self.main,
+                "train_epoch",
+                epoch=1,
+                epoch_seconds=20,
+                training_seconds=12,
+                validation_seconds=4,
+            )
+        self.assertEqual(tracker.estimate(), (380, 152, []))
+
+    def test_breakdown_exposes_unobserved_datasets_after_another_dataset_calibrates(self):
+        """Observed CIFAR epochs cannot make unobserved Tiny ImageNet timing appear calibrated."""
+        self.plan["resolved_recipes"]["tiny_imagenet"] = Config(
+            dataset="tiny_imagenet", method="erm", epochs=10, milestones=(5,)
+        ).to_dict()
+        self.manifests["tiny_imagenet"] = self.manifests["cifar100"]
+        self.profiles["tiny_imagenet"] = {
+            "methods": {
+                "erm": {"training_images_per_second": 20, "evaluation_images_per_second": 10}
+            }
+        }
+        tracker = self.tracker()
+        self.assertEqual(tracker.estimate_breakdown()["observed_training_groups"], 0)
+        with contextlib.redirect_stdout(io.StringIO()):
+            tracker.update(
+                self.main,
+                "train_epoch",
+                epoch=1,
+                epoch_seconds=20,
+                training_seconds=12,
+                validation_seconds=4,
+            )
+        report = read_json(self.folder / "progress.json")
+        self.assertEqual(report["pending_training_timing_groups"], 2)
+        self.assertEqual(report["observed_training_timing_groups"], 1)
+        self.assertEqual(report["provisional_training_timing_groups"], ["tiny_imagenet/erm"])
+        breakdown = report["estimated_remaining_by_dataset"]
+        self.assertEqual(breakdown["cifar100"]["total_seconds"], 532)
+        self.assertEqual(breakdown["tiny_imagenet"]["total_seconds"], 71)
+
+    def test_missing_rates_do_not_become_zero_in_dataset_breakdown(self):
+        """Unknown components remain unknown even when a numeric subtotal could be computed."""
+        details = self.tracker(profiles=False).estimate_breakdown()
+        self.assertEqual(
+            details["datasets"]["cifar100"],
+            {"training_seconds": None, "evaluation_seconds": None, "total_seconds": None},
+        )

@@ -14,6 +14,8 @@ from cue_routing.io import atomic_json, environment, file_hash, read_json
 
 from .arguments import add_study_arguments, load_study_arguments, study_preview
 from .config import MAIN_METHODS, recipe
+from .cue_settings import add_cue_arguments, load_cue_arguments
+from .cue_workflow import run_cue_study
 from .data import (
     load_manifest,
     make_fixture,
@@ -221,6 +223,7 @@ def main(root):
     require_conda()
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
+    add_cue_arguments(commands.add_parser("cue"), root)
     for name in ("check", "smoke"):
         commands.add_parser(name)
     for name in ("prepare", "data-smoke", "profile", "study", "plan"):
@@ -246,6 +249,18 @@ def main(root):
             command.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
             command.add_argument("--steps", type=int, default=1)
     arguments = parser.parse_args()
+    if arguments.command == "cue":
+        try:
+            settings = load_cue_arguments(arguments)
+        except (OSError, TypeError, ValueError) as error:
+            parser.error(str(error))
+        print(json.dumps(settings.preview(), indent=2), flush=True)
+        if arguments.dry_run:
+            return
+        torch.set_num_threads(4)
+        run_cue_study(root, arguments.data_root, arguments.runs_dir, settings)
+        print(f"CUE results: {arguments.runs_dir.resolve() / 'comparison.md'}", flush=True)
+        return
     settings = None
     if arguments.command in ("profile", "study", "plan"):
         try:
