@@ -1,0 +1,1 @@
+Fresh machine-generated Office-Home reports are written here. They are ignored by Git so running checks on the GPU server does not create report conflicts during later code updates. Portable release bundles include the reports that actually exist when bundled.

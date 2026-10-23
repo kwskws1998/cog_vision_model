@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "dataset": "Office-Home",
+  "image_variant": "original_resolution",
+  "reference_code": "https://github.com/thuml/Transfer-Learning-Library/blob/master/tllib/vision/datasets/officehome.py",
+  "hash_provenance": "SHA-256 measured from the successfully downloaded mirror archives on 2026-10-23; not an author-published checksum",
+  "original_domain_archives": {
+    "Art": {
+      "url": "https://cloud.tsinghua.edu.cn/f/6a006656b9a14567ade2/?dl=1",
+      "sha256": "4e02c03474f99c1fea570ee16dc96174aa26c413359d5d46efa2f7a78eba54bc",
+      "bytes": 192040794
+    },
+    "Clipart": {
+      "url": "https://cloud.tsinghua.edu.cn/f/ae88aa31d2d7411dad79/?dl=1",
+      "sha256": "1287f9cab784d156a917cf9359961974cd8d6194eb6432c47f86e991bcbeb871",
+      "bytes": 77057329
+    },
+    "Product": {
+      "url": "https://cloud.tsinghua.edu.cn/f/f219b0ff35e142b3ab48/?dl=1",
+      "sha256": "0312920ffbea94797fa4c46a916225c67bfdd915078d07146782b2d113632662",
+      "bytes": 100781595
+    },
+    "Real_World": {
+      "url": "https://cloud.tsinghua.edu.cn/f/6c19f3f15bb24ed3951a/?dl=1",
+      "sha256": "cd3bce6169f370f248d22edd4e90c260469dda165a61fe8a5d95894af28464c0",
+      "bytes": 754478949
+    }
+  },
+  "original_image_collection_sha256": "a1530596c2be0d4553a7188c1248fd1ef203755d65c7055fc8053763bd242249"
+}

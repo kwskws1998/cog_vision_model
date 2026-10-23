@@ -1,0 +1,6 @@
+{
+  "schema": 1,
+  "shared_core_source_sha256": "583fc84119e4d5ff16b323e91d446f394bd824eb1f400a94ee8bfdadff9ad4e2",
+  "shared_core_git_commit": "682847e",
+  "compatibility_requirement": "The Office-Home addition must not edit any source/config/reference/test/setup file in the existing PACS fingerprint."
+}
