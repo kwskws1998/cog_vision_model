@@ -28,6 +28,7 @@
     0.5
   ],
   "training": {
+    "activation": "postact",
     "epochs": 200,
     "batch_size": 1024,
     "eval_batch_size": 2048,

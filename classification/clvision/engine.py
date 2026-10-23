@@ -24,6 +24,7 @@ from cue_routing.io import (
 )
 from cue_routing.metrics import classification_metrics
 
+from .architecture import backbone_description
 from .config import CORRUPTIONS, Config, learning_rate_for_epoch
 from .data import CorruptionDataset, EpochBatches, load_manifest, make_loader
 from .display import BatchProgress, TrainingLog, write
@@ -37,7 +38,10 @@ from .runtime import diagnostic_scalars, reset_run_memory, runtime_status, timed
 def make_model(config):
     """Construct the matched shared architecture and only the required Zipf auxiliary head."""
     return SmallResNet18(
-        len_classes(config.dataset), auxiliary=config.method == "zipfls_dense2", seed=config.seed
+        len_classes(config.dataset),
+        auxiliary=config.method == "zipfls_dense2",
+        seed=config.seed,
+        activation=config.activation,
     ).to(config.device)
 
 
@@ -214,6 +218,7 @@ def build_contract(config, manifest, model, root, phase, selection_id):
     return {
         "schema": 1,
         "config": config.to_dict(),
+        "backbone": backbone_description(config.activation),
         "dataset_id": manifest["dataset_id"],
         "class_order": manifest["classes"],
         "source_sha256": source_hash(root),
@@ -391,6 +396,7 @@ def train(
             f"[run] pid={status['pid']} directory={run_dir.resolve()} "
             f"input={config.input_shape[0]}x{config.input_shape[1]} "
             f"dataset={config.dataset} method={config.method} seed={config.seed} "
+            f"activation={config.activation} "
             f"train_batch={config.batch_size} eval_batch={config.eval_batch_size} "
             f"precision={config.precision}/{config.eval_precision} workers={config.workers} "
             f"vram_ceiling={config.max_vram_gib:g} GiB",

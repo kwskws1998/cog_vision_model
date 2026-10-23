@@ -16,6 +16,7 @@ def build_parser():
     """Share the exact same study inputs with the underlying experiment command."""
     from clvision.ablation_settings import add_ablation_arguments
     from clvision.arguments import add_study_arguments
+    from clvision.config import ACTIVATIONS
     from clvision.cue_settings import add_cue_arguments, add_erm_arguments
 
     parser = argparse.ArgumentParser(description=__doc__)
@@ -24,7 +25,9 @@ def build_parser():
     add_erm_arguments(stages.add_parser("erm"), ROOT)
     add_ablation_arguments(stages.add_parser("ablation"), ROOT)
     for name in ("check", "smoke"):
-        stages.add_parser(name)
+        stage = stages.add_parser(name)
+        if name == "smoke":
+            stage.add_argument("--activation", choices=ACTIVATIONS, default="postact")
     prepare = stages.add_parser("prepare")
     prepare.add_argument("--data-root", type=Path, default=ROOT / "data/classification")
     for name in ("train", "plan"):
@@ -102,6 +105,8 @@ def main():
                 *study_argument_tokens(arguments),
             ]
         ]
+    elif arguments.stage == "smoke":
+        commands = [["smoke", "--activation", arguments.activation]]
     else:
         commands = [[arguments.stage]]
     for command in commands:

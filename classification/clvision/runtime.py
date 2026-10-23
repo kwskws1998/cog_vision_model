@@ -56,6 +56,7 @@ def runtime_status(run_dir, config, stage, epoch=None, **details):
         "epoch": epoch,
         "dataset": config.dataset,
         "method": config.method,
+        "activation": config.activation,
         "seed": config.seed,
         "train_batch_size": config.batch_size,
         "eval_batch_size": config.eval_batch_size,

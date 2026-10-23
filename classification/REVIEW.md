@@ -33,7 +33,15 @@ This file describes review scope. Actual pass counts and source fingerprints are
 
 CPU tests and synthetic studies verify code paths, not efficacy or target-GPU fit. Full-batch CUDA memory, speed, and AMP behavior must be measured on the user's server. This development host has no CUDA device.
 
-The common torchvision post-activation backbone differs from Zipf's original small-image pre-activation backbone; native64px Tiny differs from its published32px recipe. The comparison is an explicit matched operator port. The module is training-only and no ViT efficacy experiment is implemented here.
+The default torchvision post-activation backbone differs from Zipf's original small-image pre-activation backbone; the selectable PreAct implementation follows the pinned author block/stem and initialization. This choice alone does not reproduce its complete protocol. Native64px Tiny also differs from its published32px recipe. The comparison is an explicit matched operator port. The module is training-only and no ViT efficacy experiment is implemented here.
+
+## Selectable backbone verification, 2026-10-23
+
+The combined Conda suite passed 251 tests with zero failures, errors, or skips after adding `activation=postact|preact`. Independent tests load the pinned Zipf reference implementation and compare PreAct shared initial tensors, logits, all shared parameter/input gradients, and BatchNorm updates. A preserved old constructor checks exact PostAct state keys, RNG, initial tensors, and predictions when the option is omitted or explicitly `postact`.
+
+Additional checks cover all eight training interventions, 32px/64px/rectangular maps, signed features and unequal-area CUE readout gradients, auxiliary initialization isolation, both CLI entrypoints and JSON precedence, exact PreAct checkpoint resume/final reconstruction, real synthetic ERM/CUE workflows, and accurate backbone labels in saved reports. Changed activation invalidates a CUDA profile, checkpoint resume, or frozen study plan; a full-study report cannot pool both architectures under one dataset label. These are implementation checks, not accuracy or GPU throughput measurements.
+
+The separate `classification/run.py smoke --activation preact` also passed: 34 reduced synthetic training runs, 136 accepted optimizer steps, and 16 clean final evaluations across CIFAR-100, Tiny ImageNet, and Dominoes. It reused completed artifacts exactly and rejected deliberately reordered predictions. The expected rejection is logged as a failed tampered study; the smoke command itself returned success after checking that rejection.
 
 ## Original implementation verification, 2026-10-23
 

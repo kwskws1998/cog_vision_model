@@ -116,7 +116,7 @@
     }
   ],
   "common_natural_image_recipe": {
-    "backbone": "ResNet-18 with a 3x3 stride-1 stem and no maxpool",
+    "backbone": "Default postact ResNet-18 with a 3x3 stride-1 stem and no maxpool; activation=preact explicitly selects the pinned Zipf small-image backbone for every matched arm",
     "pretraining": "none; identical random backbone and final-head initialization per paired seed",
     "batchnorm": "train running statistics in every arm",
     "cue_grid": [
@@ -370,7 +370,7 @@
     "package": "classification/clvision",
     "entry_point": "classification/experiment.py",
     "driver": "classification/run.py",
-    "architecture_boundary": "Common torchvision post-activation ResNet18 with a small-image stem for all methods. The reference small-image Zipf code uses a pre-activation backbone, so this is a matched operator port, not its reported-score reproduction.",
+    "architecture_boundary": "Default: common torchvision post-activation ResNet18 with a small-image stem. Optional activation=preact follows Zipf reference 108e27a block/stem and initialization, including preactivated shortcuts and no terminal BN/ReLU, with spatial global pooling for 32/64px and rectangular inputs. Each dataset uses the same selected backbone in all arms. Neither selection alone reproduces the reference's complete reported-score protocol.",
     "classification_runner": "registered twenty-run natural comparison plus eighteen development trials and twelve mechanism runs, using paired seeds 0 and 1",
     "final_test_policy": "All main and mechanism training precedes every final evaluation, including mechanism tests."
   }

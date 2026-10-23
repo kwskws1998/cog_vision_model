@@ -5,6 +5,8 @@ import math
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
+from .architecture import ACTIVATIONS
+
 MAIN_METHODS = ("erm", "label_smoothing", "fixed_global_local", "zipfls_dense2", "cue")
 MECHANISM_METHODS = (
     "erm",
@@ -40,6 +42,7 @@ class Config:
 
     dataset: str = "cifar100"
     tiny_imagenet_size: int = 64
+    activation: str = "postact"
     method: str = "cue"
     seed: int = 0
     epochs: int = 200
@@ -74,6 +77,8 @@ class Config:
             raise ValueError("Unknown dataset or comparison method")
         if type(self.tiny_imagenet_size) is not int or self.tiny_imagenet_size not in (32, 64):
             raise ValueError("tiny_imagenet_size must be 32 or 64")
+        if type(self.activation) is not str or self.activation not in ACTIVATIONS:
+            raise ValueError("activation must be postact or preact")
         for key in (
             "seed",
             "epochs",

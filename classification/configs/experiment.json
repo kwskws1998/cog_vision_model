@@ -5,6 +5,7 @@
   "mechanism_seeds": [0, 1],
   "development_seed": 2027,
   "training": {
+    "activation": "postact",
     "batch_size": 128,
     "eval_batch_size": 128,
     "learning_rate": 0.1,

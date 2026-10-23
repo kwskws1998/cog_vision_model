@@ -13,6 +13,7 @@ from filelock import FileLock
 from cue_routing.io import atomic_json, canonical_hash, file_hash, read_json, run_lock
 from cue_routing.metrics import classification_metrics
 
+from .architecture import backbone_description
 from .config import CORRUPTIONS, MAIN_METHODS, MECHANISM_METHODS
 from .data import ImageDataset, load_manifest
 from .engine import evaluate_corruptions, evaluate_run, train, verify_run
@@ -308,6 +309,11 @@ def report(study_dir, root, specs, manifests, seal):
     tables = []
     for dataset in ("cifar100", "tiny_imagenet", "dominoes"):
         selected = [row for row in specs if row[1].dataset == dataset]
+        activations = {row[1].activation for row in selected}
+        if len(activations) != 1:
+            raise ValueError("A dataset comparison requires one matched backbone activation")
+        activation = next(iter(activations))
+        backbone = backbone_description(activation)
         rows, shared, contracts = [], {}, {}
         expected_data = ImageDataset(manifests[dataset], "test")
         expected_ids = [expected_data.sample_id(index) for index in range(len(expected_data))]
@@ -417,6 +423,8 @@ def report(study_dir, root, specs, manifests, seal):
                     ]
                 )
         output["datasets"][dataset] = {
+            "activation": activation,
+            "backbone": backbone,
             "methods": summary,
             "paired_differences": differences,
             "ranking": sorted(methods, key=lambda method: -summary[method]["mean_accuracy"]),
@@ -434,7 +442,14 @@ def report(study_dir, root, specs, manifests, seal):
                 if method != "cue"
             }
         tables.extend(
-            [f"## {dataset}", "", "| Method | Accuracy (%) | Seed SD (pp) |", "|---|---:|---:|"]
+            [
+                f"## {dataset}",
+                "",
+                f"Backbone: {backbone} (`{activation}`).",
+                "",
+                "| Method | Accuracy (%) | Seed SD (pp) |",
+                "|---|---:|---:|",
+            ]
         )
         for method in output["datasets"][dataset]["ranking"]:
             item = summary[method]

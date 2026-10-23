@@ -10,6 +10,7 @@ from filelock import FileLock
 from cue_routing.io import atomic_json, canonical_hash, file_hash, read_json, run_lock
 from cue_routing.metrics import classification_metrics
 
+from .architecture import backbone_description, backbone_reference_note
 from .config import Config
 from .data import ImageDataset, load_manifest
 from .engine import evaluate_run, train, verify_run
@@ -152,7 +153,8 @@ def cue_report(directory, root, plan, manifests, specs, seal):
             "split_counts": {
                 name: len(rows) for name, rows in manifests[dataset]["splits"].items()
             },
-            "backbone": "torchvision post-activation small-image ResNet-18",
+            "activation": selected[0][1].activation,
+            "backbone": backbone_description(selected[0][1].activation),
             "input_size": selected[0][1].input_shape[0],
         }
         published = [row for row in references["scores"] if row["dataset"] == dataset]
@@ -170,7 +172,7 @@ def cue_report(directory, root, plan, manifests, specs, seal):
             else []
         )
         differences_note = [
-            "Our post-activation backbone differs from the pinned author pre-activation implementation.",
+            backbone_reference_note(measured["activation"]),
             "Our training holds out an internal validation split; the table does not establish identical split indices.",
             f"Our input size is {measured['input_size']}px; the paper uses 32px for both datasets.",
             f"Our batch/LR/warmup: {measured['config']['batch_size']}/"
@@ -189,6 +191,8 @@ def cue_report(directory, root, plan, manifests, specs, seal):
         )
         lines += [
             f"## {dataset}",
+            "",
+            f"Backbone: {measured['backbone']} (`{measured['activation']}`).",
             "",
             "| Method | Origin | Accuracy (%) | Seed SD (pp) | Seeds |",
             "|---|---|---:|---:|---:|",

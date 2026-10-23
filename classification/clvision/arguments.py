@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from .config import ACTIVATIONS
 from .display import add_display_arguments
 from .settings import StudySettings
 
@@ -36,6 +37,7 @@ def add_study_arguments(parser, root):
     parser.add_argument("--device", choices=("cpu", "cuda"))
     parser.add_argument("--precision", choices=("fp32", "fp16", "bf16"))
     parser.add_argument("--eval-precision", choices=("fp32", "fp16", "bf16"))
+    parser.add_argument("--activation", choices=ACTIVATIONS)
     parser.add_argument("--epochs", type=int, help="Natural-image training epochs")
     parser.add_argument("--milestones", type=int, nargs="*", help="Natural-image LR drop epochs")
     parser.add_argument("--mechanism-epochs", type=int)
@@ -68,7 +70,7 @@ def load_study_arguments(arguments):
             values[name] = value
     updates = {
         name: getattr(arguments, name)
-        for name in (*TRAINING_FIELDS, "device", "precision", "eval_precision")
+        for name in (*TRAINING_FIELDS, "device", "precision", "eval_precision", "activation")
         if getattr(arguments, name, None) is not None
     }
     values["training"] = {**values.get("training", {}), **updates}
@@ -111,6 +113,7 @@ def study_argument_tokens(arguments):
         "device",
         "precision",
         "eval_precision",
+        "activation",
         "epochs",
         "milestones",
         "mechanism_epochs",

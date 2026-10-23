@@ -15,7 +15,7 @@ from cue_routing.io import atomic_json, environment, file_hash, read_json
 from .ablation_settings import add_ablation_arguments, load_ablation_arguments
 from .ablation_workflow import run_ablation
 from .arguments import add_study_arguments, load_study_arguments, study_preview
-from .config import MAIN_METHODS, recipe
+from .config import ACTIVATIONS, MAIN_METHODS, recipe
 from .cue_settings import (
     CueSettings,
     ErmSettings,
@@ -103,7 +103,7 @@ def prepare(root, data_root, datasets, download):
     return report
 
 
-def data_smoke(root, manifest, device="cpu", steps=1):
+def data_smoke(root, manifest, device="cpu", steps=1, activation="postact"):
     """Verify matched real-source updates without constructing any final-test loader."""
     if steps < 1:
         raise ValueError("At least one smoke update is required")
@@ -114,11 +114,13 @@ def data_smoke(root, manifest, device="cpu", steps=1):
         "target_loader_accessed": False,
         "methods": {},
         "device": device,
+        "activation": activation,
     }
     for method in MAIN_METHODS:
         config = recipe(
             manifest["dataset"],
             method=method,
+            activation=activation,
             debug=True,
             device=device,
             precision="fp32" if device == "cpu" else "fp16",
@@ -166,13 +168,16 @@ def data_smoke(root, manifest, device="cpu", steps=1):
     return result
 
 
-def smoke(root):
+def smoke(root, activation="postact"):
     """Exercise every stage of a complete reduced study using explicit synthetic fixtures."""
     with tempfile.TemporaryDirectory(prefix="classification-smoke-") as temporary:
         temporary = Path(temporary)
+        settings = {"training": {"activation": activation}}
         for dataset in ("cifar100", "tiny_imagenet", "dominoes"):
             make_fixture(temporary / "data", dataset)
-        result = run_study(root, temporary / "data", temporary / "study", debug=True, workers=0)
+        result = run_study(
+            root, temporary / "data", temporary / "study", settings=settings, debug=True, workers=0
+        )
         progress = read_json(temporary / "study/progress.json")
         if (
             progress["status"] != "complete"
@@ -184,7 +189,9 @@ def smoke(root):
         completions = {
             str(path): file_hash(path) for path in (temporary / "study").rglob("completion.json")
         }
-        repeated = run_study(root, temporary / "data", temporary / "study", debug=True, workers=0)
+        repeated = run_study(
+            root, temporary / "data", temporary / "study", settings=settings, debug=True, workers=0
+        )
         resumed_progress = read_json(temporary / "study/progress.json")
         if repeated != result or any(
             file_hash(path) != digest for path, digest in completions.items()
@@ -203,7 +210,14 @@ def smoke(root):
         atomic_json(metrics_path, metrics)
         try:
             try:
-                run_study(root, temporary / "data", temporary / "study", debug=True, workers=0)
+                run_study(
+                    root,
+                    temporary / "data",
+                    temporary / "study",
+                    settings=settings,
+                    debug=True,
+                    workers=0,
+                )
             except ValueError as error:
                 if "order" not in str(error):
                     raise
@@ -215,6 +229,7 @@ def smoke(root):
     report = {
         "source_sha256": source_hash(root),
         "passed": True,
+        "activation": activation,
         "benchmark_evidence": False,
         "datasets": list(result["datasets"]),
         "purpose": "synthetic_complete_study_verification",
@@ -236,7 +251,9 @@ def main(root):
     add_erm_arguments(commands.add_parser("erm"), root)
     add_ablation_arguments(commands.add_parser("ablation"), root)
     for name in ("check", "smoke"):
-        commands.add_parser(name)
+        command = commands.add_parser(name)
+        if name == "smoke":
+            command.add_argument("--activation", choices=ACTIVATIONS, default="postact")
     for name in ("prepare", "data-smoke", "profile", "study", "plan"):
         command = commands.add_parser(name)
         command.add_argument("--data-root", type=Path, default=root / "data/classification")
@@ -259,6 +276,7 @@ def main(root):
         if name == "data-smoke":
             command.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
             command.add_argument("--steps", type=int, default=1)
+            command.add_argument("--activation", choices=ACTIVATIONS, default="postact")
     arguments = parser.parse_args()
     try:
         display = options_from_arguments(arguments)
@@ -307,7 +325,7 @@ def main(root):
         )
         value = prepare(root, arguments.data_root, datasets, arguments.download)
     elif arguments.command == "smoke":
-        value = smoke(root)
+        value = smoke(root, arguments.activation)
     elif arguments.command == "study":
         print(json.dumps(study_preview(settings), indent=2), flush=True)
         with display_options(display):
@@ -327,7 +345,9 @@ def main(root):
             root_override=arguments.data_root,
         )
         if arguments.command == "data-smoke":
-            value = data_smoke(root, manifest, arguments.device, arguments.steps)
+            value = data_smoke(
+                root, manifest, arguments.device, arguments.steps, arguments.activation
+            )
         else:
             base = base_recipe(arguments.dataset, settings)
             with display_options(display):

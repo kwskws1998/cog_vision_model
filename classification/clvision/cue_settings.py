@@ -5,7 +5,7 @@ import json
 from dataclasses import asdict, dataclass, field, fields, replace
 from pathlib import Path
 
-from .config import Config
+from .config import ACTIVATIONS, Config
 from .display import add_display_arguments
 
 DATASETS = ("cifar100", "tiny_imagenet")
@@ -146,6 +146,7 @@ def add_cue_arguments(parser, root):
     parser.add_argument("--datasets", choices=DATASETS, nargs="+")
     parser.add_argument("--seeds", type=int, nargs="+")
     parser.add_argument("--tiny-imagenet-size", type=int, choices=(32, 64))
+    parser.add_argument("--activation", choices=ACTIVATIONS)
     for name in ("epochs", "batch_size", "eval_batch_size", "workers", "warmup_epochs"):
         parser.add_argument("--" + name.replace("_", "-"), type=int)
     parser.add_argument("--milestones", type=int, nargs="*")

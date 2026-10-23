@@ -1,4 +1,4 @@
-"""Common small-image ResNet-18 and the complete two-stage spatial Zipf readout."""
+"""Selectable small-image ResNet-18 backbones and the two-stage spatial Zipf readout."""
 
 import torch
 from torch import nn
@@ -8,16 +8,65 @@ from torchvision.models import resnet18
 from cue_routing.io import state_hash
 from cue_routing.models import CueReadout
 
+from .architecture import ACTIVATIONS
+
+
+class ZipfPreActBlock(nn.Module):
+    """Match pinned Zipf PreActBlock, including its preactivated identity shortcut."""
+
+    def __init__(self, in_channels, channels, stride=1):
+        super().__init__()
+        self.bn1 = nn.BatchNorm2d(in_channels)
+        self.conv1 = nn.Conv2d(in_channels, channels, 3, stride=stride, padding=1, bias=False)
+        self.bn2 = nn.BatchNorm2d(channels)
+        self.conv2 = nn.Conv2d(channels, channels, 3, padding=1, bias=False)
+        self.relu = nn.ReLU(inplace=True)
+        self.shortcut = nn.Sequential()
+        if stride != 1 or in_channels != channels:
+            self.shortcut = nn.Sequential(
+                nn.Conv2d(in_channels, channels, 1, stride=stride, bias=False)
+            )
+
+    def forward(self, values):
+        """Apply BN/ReLU before convolutions and add the preactivated shortcut without ReLU."""
+        activated = self.relu(self.bn1(values))
+        shortcut = self.shortcut(activated)
+        values = self.conv1(activated)
+        values = self.conv2(self.relu(self.bn2(values)))
+        return values + shortcut
+
+
+class _ZipfPreActResNet18(nn.Module):
+    """Match the official CIFAR stem, stage order, and default parameter initialization."""
+
+    def __init__(self, classes):
+        super().__init__()
+        self.conv1 = nn.Conv2d(3, 64, 3, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(64)
+        self.relu = nn.ReLU(inplace=True)
+        self.maxpool = nn.Identity()
+        self.layer1 = nn.Sequential(ZipfPreActBlock(64, 64), ZipfPreActBlock(64, 64))
+        self.layer2 = nn.Sequential(ZipfPreActBlock(64, 128, 2), ZipfPreActBlock(128, 128))
+        self.layer3 = nn.Sequential(ZipfPreActBlock(128, 256, 2), ZipfPreActBlock(256, 256))
+        self.layer4 = nn.Sequential(ZipfPreActBlock(256, 512, 2), ZipfPreActBlock(512, 512))
+        self.fc = nn.Linear(512, classes)
+
 
 class SmallResNet18(nn.Module):
     """Share the backbone and inference head; only Zipf adds a train-time auxiliary head."""
 
-    def __init__(self, classes, auxiliary=False, seed=0):
+    def __init__(self, classes, auxiliary=False, seed=0, activation="postact"):
         super().__init__()
-        network = resnet18(weights=None, num_classes=classes)
-        network.conv1 = nn.Conv2d(3, 64, 3, stride=1, padding=1, bias=False)
-        nn.init.kaiming_normal_(network.conv1.weight, mode="fan_out", nonlinearity="relu")
-        network.maxpool = nn.Identity()
+        if activation not in ACTIVATIONS:
+            raise ValueError("activation must be 'postact' or 'preact'")
+        self.activation = activation
+        if activation == "postact":
+            network = resnet18(weights=None, num_classes=classes)
+            network.conv1 = nn.Conv2d(3, 64, 3, stride=1, padding=1, bias=False)
+            nn.init.kaiming_normal_(network.conv1.weight, mode="fan_out", nonlinearity="relu")
+            network.maxpool = nn.Identity()
+        else:
+            network = _ZipfPreActResNet18(classes)
         self.backbone = nn.Sequential(
             network.conv1,
             network.bn1,

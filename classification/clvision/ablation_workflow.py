@@ -11,6 +11,7 @@ from filelock import FileLock
 from cue_routing.io import atomic_json, canonical_hash, file_hash, read_json, run_lock
 
 from .ablation_settings import AblationSettings
+from .architecture import backbone_description, backbone_reference_note
 from .cue_workflow import REFERENCE, make_cue_plan, verified_metrics
 from .data import load_manifest
 from .engine import evaluate_run, train, verify_run
@@ -204,11 +205,14 @@ def ablation_report(directory, root, plan, specs, manifests, seal):
         lines += ["Synthetic debug results are not benchmark accuracy.", ""]
     for dataset in plan["natural_datasets"]:
         methods = {}
-        input_size = next(spec[1].input_shape[0] for spec in specs if spec[1].dataset == dataset)
+        config = next(spec[1] for spec in specs if spec[1].dataset == dataset)
+        input_size = config.input_shape[0]
+        backbone = backbone_description(config.activation)
         lines += [
             f"## {dataset}",
             "",
             f"Model input: {input_size} x {input_size} pixels for every arm and split.",
+            f"Backbone: {backbone} (`{config.activation}`) for every arm.",
             "",
             "| Method | Measured accuracy (%) | Seed SD (pp) |",
             "|---|---:|---:|",
@@ -248,6 +252,8 @@ def ablation_report(directory, root, plan, specs, manifests, seal):
         published = [row for row in references["scores"] if row["dataset"] == dataset]
         output["datasets"][dataset] = {
             "input_size": input_size,
+            "activation": config.activation,
+            "backbone": backbone,
             "methods": methods,
             "paired_differences": differences,
             "selection": read_json(Path(directory) / "development" / dataset / "selection.json"),
@@ -271,7 +277,8 @@ def ablation_report(directory, root, plan, specs, manifests, seal):
         lines += [f"| {row['method']} | {row['mean_accuracy_percent']:.2f} |" for row in published]
         lines += [
             "",
-            "Protocol differences remain in backbone, split, batch/LR/warmup, and seed count; "
+            backbone_reference_note(config.activation),
+            "Split, batch/LR/warmup, and seed count must also match for a protocol reproduction; "
             f"our input is {input_size}px and the published input is 32px. Matching resolution alone does not match the full protocol.",
             "",
         ]

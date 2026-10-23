@@ -4,6 +4,66 @@ This directory implements CIFAR-100, CIFAR-100-C, Tiny ImageNet-200 with explici
 
 The main comparison is ERM, uniform non-target label smoothing, fixed global-to-local self-distillation, Zipf's Label Smoothing dense2, and CUE. These are training interventions on a common small-image ResNet-18. Final inference is global average pooling and the shared final classifier. CUE does not adapt or choose cues during testing.
 
+## Select PostAct or PreAct
+
+Every classification training mode accepts `--activation postact` or `--activation preact`: `erm`, `cue`, `ablation`, and full `train`/`study`. The same choice is supported by plans, CUDA profiles, and smoke verification. Omission preserves `postact`; all shipped presets explicitly retain that default. Set `"activation": "preact"` inside a JSON preset's `training` object to change its default. Dataset overrides may select a different backbone per dataset; an explicit CLI flag overrides both the common setting and all dataset overrides.
+
+- `postact`: the existing torchvision ResNet-18 with a 3x3 stride-one stem and no maxpool. The selector preserves its original weights, state keys, RNG sequence, and predictions for the same seed.
+- `preact`: the backbone from the pinned [Zipf author code, revision 108e27a](https://github.com/megvii-research/zipfls/blob/108e27aaf81aee0dc6dcd965ed6389f2ea06ba10/pytorch_zipfls/cifar_models/resnet.py). It uses a Conv/BN/ReLU stem, eight pre-activation blocks, and no terminal BN/ReLU. In this specific reference, even the no-projection shortcut uses the **preactivated** tensor. It is not a generic identity-shortcut ResNet-v2. Backbone and final-head initialization follow that reference; the optional Zipf auxiliary head keeps our isolated initialization to preserve matched ERM/CUE/Zipf shared weights.
+
+Both expose the same 256/512-channel penultimate/final maps and support CIFAR 32px, Tiny 32/64px, and rectangular Dominoes inputs. The readout uses global spatial averaging, generalizing the reference's fixed 32px pooling to those sizes. Negative PreAct feature values are valid for CUE. There is no inference-time routing or new CUE parameter. This option compares two backbone implementations, including their initialization and shortcuts; it does not isolate only the position of BN/ReLU.
+
+Use a separate study directory for each activation. Plans, run contracts, checkpoints, CUDA preflight signatures, startup logs, runtime snapshots, and comparison reports record the selected architecture. Changing activation cannot reuse an old preflight, resume another architecture's checkpoint, or silently overwrite an existing study. Existing checkpoints still require their original executable source; a source update is not a checkpoint migration.
+
+For a fixed-recipe paired comparison, run the following after updating through GitHub and activating the existing project Conda environment. Change only `ACTIVATION` to choose the other backbone. This example schedules **four runs**: CIFAR-100 ERM/CUE with seeds 0 and 1, with no tuning or corruption grid. The first CUDA preflight measures the selected backbone's actual throughput and memory before training; no PreAct speed or accuracy improvement is assumed.
+
+```bash
+(
+set -e
+set -o pipefail
+cd /workspace/cog_vision_model
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate "$PWD/.conda"
+python bootstrap.py --device cuda --verify-only
+
+ACTIVATION=preact
+STAMP=$(date +%Y%m%d_%H%M%S)
+RUN_NAME="erm_cue_${ACTIVATION}_cifar100_bf16_b1024_seeds0_1_${STAMP}"
+mkdir -p results
+
+python -u classification/run.py ablation \
+  --config classification/configs/ablation_5090.json \
+  --data-root data/classification \
+  --runs-dir "runs/${RUN_NAME}" \
+  --activation "$ACTIVATION" \
+  --datasets cifar100 \
+  --methods erm cue \
+  --seeds 0 1 \
+  --no-tune \
+  --epochs 200 \
+  --milestones 100 150 \
+  --batch-size 1024 \
+  --eval-batch-size 2048 \
+  --learning-rate 0.8 \
+  --warmup-epochs 5 \
+  --momentum 0.9 \
+  --weight-decay 1e-4 \
+  --lr-decay 0.1 \
+  --gate-tau 0.15 \
+  --gate-temperature 0.05 \
+  --joint-floor 0.5 \
+  --precision bf16 \
+  --eval-precision fp32 \
+  --device cuda \
+  --workers 8 \
+  --max-vram-gib 28 \
+  --logging-steps 200 \
+  2>&1 | tee "results/${RUN_NAME}.log"
+)
+```
+
+Use `--datasets tiny_imagenet --tiny-imagenet-size 32` for the paired Tiny32 comparison, or `64` for native-resolution Tiny. `--datasets cifar100 tiny_imagenet` schedules eight runs with two methods and two seeds. `--dry-run` prints the exact scope without starting training. For tuning, retain `--activation` but use `--tune --lr-candidates ... --tau-candidates ...` and remove scalar `--learning-rate`/`--gate-tau` overrides; selection remains validation-only. Keep each architecture's ERM and CUE controls matched.
+
 ## Trainer-style progress logging
 
 The classification runners now use a run-wide optimizer-step progress bar, following the presentation used by the decoder VA project's Transformers Trainer. It is enabled by default for `erm`, `cue`, `ablation`, and full `train`/`study` runs, including output piped through `tee`. Training, validation, final-test, and CUDA preflight displays identify the dataset, method, and seed where applicable.
@@ -407,9 +467,9 @@ The mechanism controls are ERM, fixed consistency, CUE, pure marginal supervisio
 
 ## Shared recipe and competitor fidelity
 
-All natural methods use torchvision's post-activation ResNet-18, a3x3 stride-one stem, no maxpool, trainable BatchNorm statistics, no pretraining, batch128, and SGD with learning rate0.1, momentum0.9, weight decay0.0001. The rate drops tenfold after epochs100 and150. All use the final epoch200 checkpoint. CIFAR uses padded32px crops and flips; Tiny uses padded64px crops and flips. The only extra Zipf parameters are its training-only penultimate linear classifier.
+The original full-study preset uses torchvision's post-activation ResNet-18, a3x3 stride-one stem, no maxpool, trainable BatchNorm statistics, no pretraining, batch128, and SGD with learning rate0.1, momentum0.9, weight decay0.0001. The rate drops tenfold after epochs100 and150. All use the final epoch200 checkpoint. CIFAR uses padded32px crops and flips; Tiny uses padded64px crops and flips. The selectable PreAct option and 5090 presets are described above; the resolved run recipe is authoritative. The only extra Zipf parameters are its training-only penultimate linear classifier.
 
-The Zipf port retains final-plus-penultimate votes, factor-two bilinear spatial upsampling, minimum-tie ranks, exponent1, target exclusion and renormalization, unmasked non-target KL, and auxiliary CE. Auxiliary weights are0.1 for CIFAR and0.5 for Tiny. Its chosen KL weight comes only from the declared validation candidates. The official reference's small-image backbone is pre-activation and its published Tiny experiments resize to32px; our common post-activation/native64px study is a matched reevaluation, not numerical reproduction of the paper. The full pinned reference files, license, and hashes are under `references/`.
+The Zipf port retains final-plus-penultimate votes, factor-two bilinear spatial upsampling, minimum-tie ranks, exponent1, target exclusion and renormalization, unmasked non-target KL, and auxiliary CE. Auxiliary weights are0.1 for CIFAR and0.5 for Tiny. Its chosen KL weight comes only from the declared validation candidates. The official reference's small-image backbone is pre-activation and its published Tiny experiments resize to32px; the original common post-activation/native64px study is a matched reevaluation, not numerical reproduction of the paper. Selecting PreAct aligns the backbone block/stem implementation but does not match the complete data, optimizer, auxiliary initialization, and evaluation protocol. The full pinned reference files, license, and hashes are under `references/`.
 
 CUE uses the current per-cue detached disagreement gate and its exactly gradient-equivalent global-to-local KL expression. The numerical implementation checks gradients through both shared features and classifier parameters. Its scalar logged loss need not equal the legacy surrogate's scalar value. A gain over fixed consistency is required to attribute usefulness to adaptive weighting.
 
@@ -425,4 +485,4 @@ See `REVIEW.md` for implementation checks, `SOURCES.md` for exact paper excerpts
 
 The default settings retain the two-seed pilot. Existing study plans and checkpoints cannot be resumed across changed source or scope. Finish or stop an existing training process before updating code; keep its original results as a separate study.
 
-The audit retains historical PACS/Office-Home hash comparisons as provenance information; current verification still requires matching current source hashes and successful outcomes. Because the configurable workflow also updates shared setup and CLI modules, distribute the full project using `python bundle.py --output /absolute/path/to/cog_vision_model.zip`. `classification/bundle.py` produces the same complete source layout after requiring a current passing classification audit. Neither package includes datasets, environments, caches, or run checkpoints.
+The audit retains historical PACS/Office-Home hash comparisons as provenance information; current verification still requires matching current source hashes and successful outcomes. Update the full project through GitHub between experiments, using `git pull --ff-only origin main` from the server checkout. Local edits must be preserved and reconciled before pulling; no ZIP extraction is needed.
