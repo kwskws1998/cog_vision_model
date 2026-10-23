@@ -12,7 +12,33 @@ from clvision.models import SmallResNet18
 from torch.nn import functional as F
 
 from cue_routing.io import seed_everything
+from cue_routing.models import CueReadout
 from cue_routing.routing import route_gates, routed_loss
+
+
+def numpy_probabilities(logits):
+    """Calculate the reference categorical probabilities without using either routing operator."""
+    exponentials = np.exp(logits - logits.max(axis=-1, keepdims=True))
+    return exponentials / exponentials.sum(axis=-1, keepdims=True)
+
+
+def numpy_routed_gradient(logits, areas, targets, gates=None):
+    """Apply the closed-form a_k/B [gamma_k p_joint + (1-gamma_k) p_k - y] derivative."""
+    joint = numpy_probabilities((logits * areas[None, :, None]).sum(axis=1))
+    local = numpy_probabilities(logits)
+    if gates is None:
+        discrepancy = np.linalg.norm(local - joint[:, None], axis=-1) / np.sqrt(2)
+        gates = 0.5 + 0.5 / (1 + np.exp(-(discrepancy - 0.15) / 0.05))
+    one_hot = np.eye(logits.shape[-1])[targets, None]
+    gradient = (
+        areas[None, :, None]
+        / len(targets)
+        * (gates[..., None] * joint[:, None] + (1 - gates[..., None]) * local - one_hot)
+    )
+    global_ce = -np.log(joint[np.arange(len(targets)), targets]).mean()
+    kl = (joint[:, None] * (np.log(joint[:, None]) - np.log(local))).sum(axis=-1)
+    objective = global_ce + (areas[None] * (1 - gates) * kl).sum(axis=1).mean()
+    return gradient, objective
 
 
 class ClassificationOperatorTests(unittest.TestCase):
@@ -74,6 +100,81 @@ class ClassificationOperatorTests(unittest.TestCase):
         torch.testing.assert_close(
             torch.autograd.grad(marginal, local, retain_graph=True)[0],
             torch.autograd.grad(independent, local)[0],
+        )
+
+    def test_cue_closed_form_gradient_and_scalar_with_unequal_areas(self):
+        """Check the detached teacher/gate derivative and both endpoints against independent NumPy."""
+        generator = np.random.default_rng(9021)
+        areas = np.array([9, 12, 12, 16], dtype=np.float64) / 49
+        for classes in (2, 7, 100, 200):
+            values = generator.normal(0, 3, size=(5, 4, classes))
+            targets = generator.integers(classes, size=5)
+            for method, fixed_lambda, gates in (
+                ("cue", 0.25, None),
+                ("fixed_global_local", 0, np.ones((5, 4))),
+                ("pure_marginal", 0.25, np.zeros((5, 4))),
+            ):
+                with self.subTest(classes=classes, method=method):
+                    local = torch.tensor(values, requires_grad=True)
+                    config = replace(Config(), method=method, fixed_lambda=fixed_lambda)
+                    loss, _, _ = consistency_loss(
+                        local, torch.tensor(areas), torch.tensor(targets), config
+                    )
+                    expected_gradient, expected_loss = numpy_routed_gradient(
+                        values, areas, targets, gates
+                    )
+                    np.testing.assert_allclose(
+                        torch.autograd.grad(loss, local)[0].numpy(),
+                        expected_gradient,
+                        rtol=1e-12,
+                        atol=1e-12,
+                    )
+                    self.assertAlmostEqual(loss.detach().item(), expected_loss, places=12)
+
+    def test_cue_closed_form_shared_spatial_head_derivatives(self):
+        """Propagate the analytic logit derivative through unequal regions and the shared affine head."""
+        generator = np.random.default_rng(9022)
+        readout = CueReadout(3, 7).double()
+        with torch.no_grad():
+            readout.classifier.weight.copy_(torch.tensor(generator.normal(size=(7, 3))))
+            readout.classifier.bias.copy_(torch.tensor(generator.normal(size=7)))
+        values = generator.normal(size=(5, 3, 7, 7))
+        targets = generator.integers(7, size=5)
+        features = torch.tensor(values, requires_grad=True)
+        local, areas = readout.cue_logits(features)
+        loss, joint, _ = consistency_loss(local, areas, torch.tensor(targets), Config())
+        actual = torch.autograd.grad(
+            loss, (features, readout.classifier.weight, readout.classifier.bias)
+        )
+        regions = ((0, 3, 0, 3), (0, 3, 3, 7), (3, 7, 0, 3), (3, 7, 3, 7))
+        pooled = np.stack(
+            [values[:, :, y0:y1, x0:x1].mean(axis=(2, 3)) for y0, y1, x0, x1 in regions],
+            axis=1,
+        )
+        weights = readout.classifier.weight.detach().numpy()
+        bias = readout.classifier.bias.detach().numpy()
+        reference_areas = np.array([9, 12, 12, 16], dtype=np.float64) / 49
+        logits = pooled @ weights.T + bias
+        derivative, _ = numpy_routed_gradient(logits, reference_areas, targets)
+        feature_gradient = np.zeros_like(values)
+        for region, (y0, y1, x0, x1) in enumerate(regions):
+            feature_gradient[:, :, y0:y1, x0:x1] = (derivative[:, region] @ weights)[
+                :, :, None, None
+            ] / ((y1 - y0) * (x1 - x0))
+        expected = (
+            feature_gradient,
+            np.einsum("bkc,bkf->cf", derivative, pooled),
+            derivative.sum(axis=(0, 1)),
+        )
+        for observed, reference in zip(actual, expected):
+            np.testing.assert_allclose(observed.numpy(), reference, rtol=1e-12, atol=1e-12)
+        np.testing.assert_allclose(areas.numpy(), reference_areas, rtol=0, atol=0)
+        np.testing.assert_allclose(local.detach().numpy(), logits, rtol=1e-12, atol=1e-12)
+        np.testing.assert_allclose(
+            joint.detach().numpy(),
+            values.mean(axis=(2, 3)) @ weights.T + bias,
+            rtol=1e-12,
+            atol=1e-12,
         )
 
     def test_zipf_minimum_ties_and_zero_vote_classes(self):

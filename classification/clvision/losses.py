@@ -57,10 +57,17 @@ def consistency_loss(local_logits, areas, targets, config):
     ).sum(-1)
     regularizer = (areas[None] * (1 - gates) * local_kl).sum(1).mean()
     global_ce = F.cross_entropy(joint, targets)
+    mean_gate = (gates * areas[None]).sum(1)
+    gate_variance = (areas[None] * (gates - mean_gate[:, None]).square()).sum(1)
     diagnostics = {
         "global_ce": global_ce.detach(),
         "local_consistency": regularizer.detach(),
-        "joint_fraction": (gates * areas[None]).sum(1).mean().detach(),
+        "joint_fraction": mean_gate.mean().detach(),
+        "gate_within_image_std": gate_variance.sqrt().mean().detach(),
+        "joint_saturated_fraction": (areas[None] * (gates >= 0.99).to(gates.dtype))
+        .sum(1)
+        .mean()
+        .detach(),
         "gate_min": gates.min().detach(),
         "gate_max": gates.max().detach(),
         "disagreement": (disagreement * areas[None]).sum(1).mean().detach(),

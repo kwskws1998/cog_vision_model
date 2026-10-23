@@ -1,5 +1,6 @@
 """Identify the active GPU job and expose measured host waits without altering training inputs."""
 
+import gc
 import os
 import time
 from datetime import datetime, timezone
@@ -8,6 +9,14 @@ from pathlib import Path
 import torch
 
 from cue_routing.io import atomic_json
+
+
+def reset_run_memory(config):
+    """Exclude inactive preflight/previous-run cache before measuring a new run's allocations."""
+    if config.device == "cuda":
+        gc.collect()
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats()
 
 
 def diagnostic_scalars(loss, diagnostics):
@@ -62,6 +71,7 @@ def runtime_status(run_dir, config, stage, epoch=None, **details):
         value["vram"] = {
             "allocated_gib": torch.cuda.memory_allocated() / 2**30,
             "reserved_gib": torch.cuda.memory_reserved() / 2**30,
+            "peak_allocated_gib": torch.cuda.max_memory_allocated() / 2**30,
             "peak_reserved_gib": torch.cuda.max_memory_reserved() / 2**30,
         }
     atomic_json(Path(run_dir) / "runtime_status.json", value)

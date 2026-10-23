@@ -48,6 +48,18 @@ Numerically $\widetilde z_k=z$, but its gradient reaches only $u_k$. This realiz
 
 There is no guarantee that the method monotonically reduces joint CE, particularly with a shared trainable backbone and classifier. The proposed rule controls local update signals rather than proving a descent theorem.
 
+## Classification implementation
+
+The classification runner uses an equivalent gradient implementation:
+
+$$\mathcal L_{\mathrm{class}}=\operatorname{CE}(z,y)+\frac1B\sum_{n,k}a_k(1-\gamma_{nk})\operatorname{KL}(\operatorname{sg}(p_n^J)\Vert p_{nk}^M).$$
+
+Both the teacher and gate are detached. Its derivative at each cue logit is
+
+$$\frac{a_k}{B}\left[(p^J-e_y)+(1-\gamma_k)(p_k^M-p^J)\right]=\frac{a_k}{B}\left[\gamma_k(p^J-e_y)+(1-\gamma_k)(p_k^M-e_y)\right].$$
+
+Thus it realizes the proposed cue-specific update, including shared backbone and classifier gradients. Its scalar loss differs from the surrogate above. Compare ERM and CUE using the same evaluation CE/accuracy; comparing their total training loss values is not a method comparison. Independent NumPy tests calculate probabilities, gates, cue gradients, and shared feature/head derivatives without calling the routing reference implementation.
+
 ## Relation to established regularization
 
 Let $\mathcal L_M=\sum_k a_k\operatorname{CE}(u_k,y)$ and $\mathcal L_J=\operatorname{CE}(z,y)$. Exactly,

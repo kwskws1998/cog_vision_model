@@ -12,7 +12,7 @@ The classification runners now use a run-wide optimizer-step progress bar, follo
 Train tiny_imagenet/cue/s0:  25%|##5       | 4400/17600 [..., epoch=50.00/200, loss=..., lr=..., stage=train]
 Eval tiny_imagenet/cue/s0 epoch=50: ...
 [train] step=4600/17600 epoch=52.273 loss=... accuracy=... lr=...
-[epoch] tiny_imagenet/cue/s0 epoch=53/200 step=4664/17600 loss=... eval_loss=... eval_accuracy=... lr=... images/s=... peak_reserved=... elapsed=... run_remaining~=...
+[epoch] tiny_imagenet/cue/s0 epoch=53/200 step=4664/17600 train_loss=... train_accuracy=... eval_loss=... eval_accuracy=... lr=... images/s=... peak_allocated=... peak_reserved=... elapsed=... run_remaining~=... train_ce=... local_consistency=... joint_fraction=... gate_std=...
 [study] stage=training runs=... train_steps=... clean=... remaining~=... finish_KST~=...
 ```
 
@@ -29,6 +29,10 @@ Optional presentation flags:
 `bar` renders a live tqdm display and is the default. `plain` emits newline snapshots without carriage returns or cursor controls; use `--progress plain --progress-interval 10` for a clean text log. `off` hides progress displays while retaining periodic metrics, epoch summaries, study summaries, and saved telemetry. The refresh interval is in seconds; the logging interval counts accepted optimizer steps. These flags are presentation settings, separate from frozen training hyperparameters, and can change on a resume with the same executable source.
 
 Each run writes `training_log.jsonl` with sample-weighted training windows, per-epoch training/validation metrics, learning rate, timing, memory, and session-end status. A fresh session ID and `resumed_from_step` identify each restart: records from an interrupted attempt are retained, while the checkpoint remains authoritative for completed training. The bar starts at the checkpoint's accepted step count, and its rate uses only newly executed work. Failures close the bar at the last accepted step. Complete runs reused from disk are not retrained.
+
+The epoch line explicitly distinguishes online augmented `train_loss`/`train_accuracy` from deterministic internal-validation `eval_loss`/`eval_accuracy`. CUE also displays its global training CE, weighted local KL, mean joint gate, and mean within-image area-weighted gate standard deviation. Histories additionally record the area-weighted fraction of gates at least 0.99 (`joint_saturated_fraction`); this is a diagnostic threshold, not a training parameter. These statistics help distinguish an active spatial gate from constant or near-ERM behavior, but do not establish a performance benefit.
+
+Each new CUDA run releases inactive cache from preflight/earlier runs before constructing its model and resetting the memory measurement window. `peak_allocated` measures live tensor allocation peaks, while `peak_reserved` includes the allocator's cached memory and remains the enforced budget. Both are cumulative peaks for the current run, including validation. The older repeated 23.31 GiB reservation could include a previous Tiny ImageNet preflight's cache and must not be interpreted as CIFAR's tensor-memory requirement.
 
 The bar's remaining time estimates pending optimizer steps from this session's observed rate. The epoch's `run_remaining~` includes observed validation/checkpoint overhead. The separate `[study]` ETA includes all declared runs and final evaluations, with provisional dataset rates identified in `progress.json`. Finishing the training bar does not mean the final tests have completed. Detailed host-wait, validation, and checkpoint timings remain in the JSON telemetry rather than a second permanent console line every epoch.
 

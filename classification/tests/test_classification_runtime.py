@@ -10,13 +10,59 @@ from unittest.mock import patch
 import torch
 from clvision.config import Config
 from clvision.losses import consistency_loss
-from clvision.runtime import diagnostic_scalars, runtime_status, timed_batches
+from clvision.runtime import diagnostic_scalars, reset_run_memory, runtime_status, timed_batches
 
 from cue_routing.io import read_json
 
 
 class RuntimeTests(unittest.TestCase):
     """Check diagnostic semantics without requiring a CUDA device."""
+
+    def test_run_memory_baseline_excludes_prior_inactive_cache(self):
+        """Resetting a peak alone retains the prior cache; a new run must release it first."""
+        allocator = {"reserved": 23, "peak": 23}
+        events = []
+
+        def collect():
+            """Record collection before inactive memory is returned to the allocator."""
+            events.append("collect")
+
+        def release():
+            """Retain live allocations while releasing a previous large profile's cached blocks."""
+            events.append("release")
+            allocator["reserved"] = 1
+
+        def reset():
+            """Model CUDA's peak-reset semantics: reset to current reservation, not zero."""
+            events.append("reset")
+            allocator["peak"] = allocator["reserved"]
+
+        with (
+            patch("clvision.runtime.gc.collect", side_effect=collect),
+            patch("clvision.runtime.torch.cuda.empty_cache", side_effect=release),
+            patch("clvision.runtime.torch.cuda.reset_peak_memory_stats", side_effect=reset),
+        ):
+            reset_run_memory(Config(device="cpu"))
+            self.assertEqual(events, [])
+            reset_run_memory(Config())
+        self.assertEqual(events, ["collect", "release", "reset"])
+        self.assertEqual(allocator["peak"], 1)
+
+    def test_gate_telemetry_measures_within_image_variation(self):
+        """Distinguish spatially varying gates from image-common gates with the same average."""
+        local = torch.randn(2, 4, 7, requires_grad=True)
+        areas = torch.tensor([0.1, 0.2, 0.3, 0.4])
+        gates = torch.tensor([[0.5, 0.7, 0.9, 1.0], [0.86, 0.86, 0.86, 0.86]])
+        with patch(
+            "clvision.losses.route_gates", return_value=(gates, torch.zeros_like(gates), None)
+        ):
+            loss, _, metrics = consistency_loss(local, areas, torch.arange(2), Config())
+        self.assertAlmostEqual(metrics["joint_fraction"].item(), 0.86, places=6)
+        self.assertAlmostEqual(metrics["gate_within_image_std"].item(), 0.0264**0.5 / 2, places=6)
+        self.assertAlmostEqual(metrics["joint_saturated_fraction"].item(), 0.2, places=6)
+        self.assertFalse(any(value.requires_grad for value in metrics.values()))
+        loss.backward()
+        self.assertTrue(torch.isfinite(local.grad).all())
 
     def test_loss_diagnostics_remain_detached_until_batched_host_transfer(self):
         """The loss must not extract Python scalars before returning its differentiable result."""
@@ -80,6 +126,7 @@ class RuntimeTests(unittest.TestCase):
             with (
                 patch("clvision.runtime.torch.cuda.memory_allocated", return_value=2**30),
                 patch("clvision.runtime.torch.cuda.memory_reserved", return_value=2 * 2**30),
+                patch("clvision.runtime.torch.cuda.max_memory_allocated", return_value=2**30),
                 patch("clvision.runtime.torch.cuda.max_memory_reserved", return_value=3 * 2**30),
             ):
                 runtime_status(directory, config, "validation", epoch=3)
@@ -88,5 +135,6 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual((status["train_batch_size"], status["eval_batch_size"]), (1024, 2048))
             self.assertEqual((status["stage"], status["epoch"]), ("validation", 3))
             self.assertEqual(status["vram"]["reserved_gib"], 2)
+            self.assertEqual(status["vram"]["peak_allocated_gib"], 1)
             self.assertEqual(status["vram"]["peak_reserved_gib"], 3)
             self.assertEqual(status["vram_budget_gib"], 28)

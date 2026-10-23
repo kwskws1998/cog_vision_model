@@ -31,7 +31,7 @@ from .identity import source_hash
 from .losses import training_objective
 from .models import SmallResNet18
 from .progress import duration, progress_event
-from .runtime import diagnostic_scalars, runtime_status, timed_batches
+from .runtime import diagnostic_scalars, reset_run_memory, runtime_status, timed_batches
 
 
 def make_model(config):
@@ -326,6 +326,7 @@ def train(
         if (run_dir / "test_access.json").exists():
             if not (run_dir / "completion.json").exists() or not resume:
                 raise ValueError("Training after final-test access is forbidden")
+        reset_run_memory(config)
         seed_everything(config.seed, config.device)
         model = make_model(config)
         contract = build_contract(config, manifest, model, root, phase, selection_id)
@@ -385,8 +386,6 @@ def train(
             return summary
         if endpoint <= start:
             raise ValueError("Resume endpoint must follow the saved epoch")
-        if config.device == "cuda":
-            torch.cuda.reset_peak_memory_stats()
         status = runtime_status(run_dir, config, "training_start", start + 1)
         write(
             f"[run] pid={status['pid']} directory={run_dir.resolve()} "
@@ -523,6 +522,17 @@ def train(
             eta = (time.monotonic() - began) * (config.epochs - epoch) / (epoch - start)
             memory = history[-1]["vram"].get("peak_reserved_gib")
             memory_text = f"{memory:.2f} GiB" if memory is not None else "unmeasured"
+            allocated = history[-1]["vram"].get("peak_allocated_gib")
+            allocated_text = f"{allocated:.2f} GiB" if allocated is not None else "unmeasured"
+            training = history[-1]["training"]
+            routing_text = (
+                f" train_ce={training['global_ce']:.4f}"
+                f" local_consistency={training['local_consistency']:.4f}"
+                f" joint_fraction={training['joint_fraction']:.4f}"
+                f" gate_std={training['gate_within_image_std']:.4f}"
+                if "joint_fraction" in training
+                else ""
+            )
             logging.record(
                 "epoch",
                 **history[-1],
@@ -532,11 +542,11 @@ def train(
             write(
                 f"[epoch] {config.dataset}/{config.method}/s{config.seed} "
                 f"epoch={epoch}/{config.epochs} step={steps}/{logging.total_steps} "
-                f"loss={history[-1]['training']['loss']:.4f} "
+                f"train_loss={training['loss']:.4f} train_accuracy={training['train_accuracy']:.4f} "
                 f"eval_loss={validation['nll']:.4f} eval_accuracy={validation['accuracy']:.4f} "
                 f"lr={rate:.6g} images/s={history[-1]['training_images_per_second']:.1f} "
-                f"peak_reserved={memory_text} elapsed={duration(elapsed)} "
-                f"run_remaining~={duration(eta)}"
+                f"peak_allocated={allocated_text} peak_reserved={memory_text} elapsed={duration(elapsed)} "
+                f"run_remaining~={duration(eta)}{routing_text}"
             )
             progress_event(
                 run_dir,
