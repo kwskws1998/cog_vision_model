@@ -54,6 +54,7 @@ def profile_dataset(root, manifest, base_config, destination, steps=10):
         raise ValueError("At least10 accepted real-data CUDA updates are required")
     methods = MECHANISM_METHODS if base_config.dataset == "dominoes" else MAIN_METHODS
     for method in methods:
+        print(f"[preflight] {base_config.dataset} {method}: {steps} GPU updates", flush=True)
         config = replace(base_config, method=method).validate()
         gc.collect()
         torch.cuda.empty_cache()
@@ -92,11 +93,14 @@ def profile_dataset(root, manifest, base_config, destination, steps=10):
             )
         torch.cuda.synchronize()
         seconds = time.monotonic() - began
+        evaluation_began = time.monotonic()
         validation_iterator = iter(make_loader(manifest, config, "validation"))
         validation_batch = next(validation_iterator)
         if len(validation_batch[0]) != config.eval_batch_size:
             raise ValueError("Preflight requires the full declared evaluation batch")
         evaluate_loader(model, [validation_batch], config)
+        torch.cuda.synchronize()
+        evaluation_seconds = time.monotonic() - evaluation_began
         statistics = vram_stats(config)
         result["methods"][method] = {
             "signature": memory_signature(config),
@@ -105,10 +109,19 @@ def profile_dataset(root, manifest, base_config, destination, steps=10):
             "accepted_optimizer_steps": steps,
             "backbone_updated": not torch.equal(before, next(model.parameters()).detach()),
             "training_images_per_second": steps * config.batch_size / max(seconds, 1e-9),
+            "evaluation_images_per_second": len(validation_batch[0])
+            / max(evaluation_seconds, 1e-9),
             "vram": statistics,
             "last_diagnostics": diagnostics[-1],
             "training_parameters": sum(parameter.numel() for parameter in model.parameters()),
         }
+        print(
+            f"[preflight] {config.dataset} {method}: "
+            f"train={result['methods'][method]['training_images_per_second']:.1f} images/s "
+            f"eval={result['methods'][method]['evaluation_images_per_second']:.1f} images/s "
+            f"peak_reserved={statistics['peak_reserved_gib']:.2f} GiB",
+            flush=True,
+        )
         del (
             model,
             optimizer,

@@ -162,14 +162,25 @@ def smoke(root):
         for dataset in ("cifar100", "tiny_imagenet", "dominoes"):
             make_fixture(temporary / "data", dataset)
         result = run_study(root, temporary / "data", temporary / "study", debug=True, workers=0)
+        progress = read_json(temporary / "study/progress.json")
+        if (
+            progress["status"] != "complete"
+            or progress["completed_training_runs"] != progress["total_training_runs"]
+            or progress["completed_clean_evaluations"] != progress["total_clean_evaluations"]
+            or progress["estimated_remaining_seconds"] != 0
+        ):
+            raise AssertionError("Complete study progress does not match the executed scope")
         completions = {
             str(path): file_hash(path) for path in (temporary / "study").rglob("completion.json")
         }
         repeated = run_study(root, temporary / "data", temporary / "study", debug=True, workers=0)
+        resumed_progress = read_json(temporary / "study/progress.json")
         if repeated != result or any(
             file_hash(path) != digest for path, digest in completions.items()
         ):
             raise AssertionError("A completed study was not reused exactly")
+        if resumed_progress["completed_training_runs"] != progress["completed_training_runs"]:
+            raise AssertionError("Resumed progress lost completed runs")
         prediction_path = temporary / "study/main/cifar100/seed0_erm/test_predictions.pt"
         metrics_path = prediction_path.with_name("test_metrics.json")
         saved_predictions, saved_metrics = prediction_path.read_bytes(), metrics_path.read_bytes()
@@ -198,6 +209,8 @@ def smoke(root):
         "purpose": "synthetic_complete_study_verification",
         "completed_study_reused": True,
         "reordered_predictions_rejected": True,
+        "whole_study_progress_verified": True,
+        "resumed_progress_verified": True,
     }
     atomic_json(root / "classification/verification/cpu_smoke.json", report)
     return report

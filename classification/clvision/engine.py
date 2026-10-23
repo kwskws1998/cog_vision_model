@@ -28,6 +28,7 @@ from .data import CorruptionDataset, load_manifest, make_loader
 from .identity import source_hash
 from .losses import training_objective
 from .models import SmallResNet18
+from .progress import duration, progress_event
 
 
 def make_model(config):
@@ -262,7 +263,9 @@ def train(
             old = read_json(run_dir / "contract.json")
             if old != contract:
                 raise ValueError("Completed run identity differs from this requested run")
-            return verify_run(run_dir, root, config, manifest["dataset_id"], selection_id)[2]
+            summary = verify_run(run_dir, root, config, manifest["dataset_id"], selection_id)[2]
+            progress_event(run_dir, "train_complete")
+            return summary
         optimizer = optimizer_for(model, config)
         scaler = torch.amp.GradScaler(
             "cuda", enabled=config.device == "cuda" and config.precision == "fp16"
@@ -303,12 +306,18 @@ def train(
         else:
             atomic_json(run_dir / "contract.json", contract)
         if start == config.epochs:
-            return seal_run(run_dir, contract, model.state_dict(), history, steps, previous_seconds)
+            summary = seal_run(
+                run_dir, contract, model.state_dict(), history, steps, previous_seconds
+            )
+            progress_event(run_dir, "train_complete")
+            return summary
         if endpoint <= start:
             raise ValueError("Resume endpoint must follow the saved epoch")
         if config.device == "cuda":
             torch.cuda.reset_peak_memory_stats()
         began = time.monotonic()
+        progress_event(run_dir, "train_start", completed_epochs=start)
+        last_progress = began
         for epoch in range(start + 1, endpoint + 1):
             rate = config.learning_rate * config.lr_decay ** sum(
                 epoch > milestone for milestone in config.milestones
@@ -334,6 +343,18 @@ def train(
                 steps += 1
                 images_seen += len(targets)
                 retries += result["amp_overflow_retries"]
+                now = time.monotonic()
+                if now - last_progress >= 30:
+                    print(
+                        f"[batch] {config.dataset} {config.method} seed={config.seed} "
+                        f"epoch={epoch}/{config.epochs} batch={count}/{len(loader)} "
+                        f"epoch_elapsed={duration(now - epoch_began)}",
+                        flush=True,
+                    )
+                    progress_event(
+                        run_dir, "train_batch", epoch=epoch, batch=count, batches=len(loader)
+                    )
+                    last_progress = now
             if count == 0:
                 raise ValueError("Empty training epoch")
             if count != len(loader) or (
@@ -341,10 +362,12 @@ def train(
             ):
                 raise ValueError("Training epoch omitted or duplicated scheduled batches")
             train_seconds = time.monotonic() - epoch_began
+            validation_began = time.monotonic()
             validation = evaluate_loader(
                 model, make_loader(manifest, config, "validation"), config
             )[0]
             validation = {key: value for key, value in validation.items() if key != "confusion"}
+            validation_seconds = time.monotonic() - validation_began
             elapsed = previous_seconds + time.monotonic() - began
             history.append(
                 {
@@ -376,11 +399,19 @@ def train(
             atomic_json(run_dir / "history.json", history)
             eta = (time.monotonic() - began) * (config.epochs - epoch) / (epoch - start)
             print(
-                f"{config.dataset} {config.method} seed={config.seed} epoch={epoch}/{config.epochs} val_accuracy={validation['accuracy']:.4f} loss={history[-1]['training']['loss']:.4f} elapsed_s={elapsed:.1f} eta_s={eta:.1f}",
+                f"{config.dataset} {config.method} seed={config.seed} epoch={epoch}/{config.epochs} val_accuracy={validation['accuracy']:.4f} loss={history[-1]['training']['loss']:.4f} elapsed={duration(elapsed)} run_remaining~={duration(eta)} elapsed_s={elapsed:.1f} eta_s={eta:.1f}",
                 flush=True,
             )
+            progress_event(
+                run_dir,
+                "train_epoch",
+                epoch=epoch,
+                epoch_seconds=time.monotonic() - epoch_began,
+                training_seconds=train_seconds,
+                validation_seconds=validation_seconds,
+            )
         if endpoint == config.epochs:
-            return seal_run(
+            summary = seal_run(
                 run_dir,
                 contract,
                 model.state_dict(),
@@ -388,6 +419,8 @@ def train(
                 steps,
                 previous_seconds + time.monotonic() - began,
             )
+            progress_event(run_dir, "train_complete")
+            return summary
         return {
             "status": "interrupted_at_epoch_boundary",
             "completed_epochs": endpoint,
@@ -473,6 +506,8 @@ def dominoes_metrics(logits, labels):
 def evaluate_run(manifest, run_dir, root, study_seal):
     """Open the final partition only after whole-study completion, saving aligned predictions."""
     run_dir = Path(run_dir)
+    progress_event(run_dir, "clean_start")
+    evaluation_began = time.monotonic()
     with run_lock(run_dir):
         authorize_run(run_dir, study_seal)
         contract, _, _ = verify_run(run_dir, root, dataset_id=manifest["dataset_id"])
@@ -485,6 +520,7 @@ def evaluate_run(manifest, run_dir, root, study_seal):
                 or existing["prediction_sha256"] != file_hash(run_dir / "test_predictions.pt")
             ):
                 raise ValueError("Previously evaluated artifacts changed")
+            progress_event(run_dir, "clean_complete")
             return existing
         model, config, _, _ = load_final(run_dir, root, manifest)
         record_access(run_dir, study_seal, "clean_test")
@@ -523,12 +559,14 @@ def evaluate_run(manifest, run_dir, root, study_seal):
         )
         result["prediction_sha256"] = file_hash(run_dir / "test_predictions.pt")
         atomic_json(artifact, result)
+        progress_event(run_dir, "clean_complete", seconds=time.monotonic() - evaluation_began)
         return result
 
 
 def evaluate_corruptions(corruptions, clean, run_dir, root, study_seal):
     """Evaluate all75 fixed test conditions with immutable checkpoints and resumable cells."""
     run_dir = Path(run_dir)
+    progress_event(run_dir, "corruption_start")
     with run_lock(run_dir):
         authorize_run(run_dir, study_seal)
         model, config, contract, _ = load_final(run_dir, root, clean)
@@ -549,6 +587,7 @@ def evaluate_corruptions(corruptions, clean, run_dir, root, study_seal):
                 key = f"{corruption}/{severity}"
                 if key in existing["cells"]:
                     continue
+                cell_began = time.monotonic()
                 dataset = CorruptionDataset(corruptions, clean, corruption, severity)
                 loader = DataLoader(
                     dataset,
@@ -562,6 +601,12 @@ def evaluate_corruptions(corruptions, clean, run_dir, root, study_seal):
                     name: value for name, value in metrics.items() if name != "confusion"
                 }
                 atomic_json(path, existing)
+                progress_event(
+                    run_dir,
+                    "corruption_cell",
+                    completed_cells=len(existing["cells"]),
+                    seconds=time.monotonic() - cell_began,
+                )
                 print(
                     f"CIFAR100-C {config.method} seed={config.seed} {key} accuracy={metrics['accuracy']:.4f}",
                     flush=True,

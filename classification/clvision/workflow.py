@@ -2,6 +2,7 @@
 
 import math
 import statistics
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from .data import ImageDataset, load_manifest
 from .engine import evaluate_corruptions, evaluate_run, train, verify_run
 from .identity import source_hash
 from .profile import profile_dataset, verify_profile
+from .progress import StudyProgress
 from .settings import CANDIDATE_FIELDS, resolve_settings
 
 
@@ -477,24 +479,31 @@ def run_study(root, data_root, study_dir, debug=None, workers=None, settings=Non
 def _run_study(root, data_root, study_dir, debug=None, workers=None, settings=None):
     """Run development, freeze choices, train all matrices, then evaluate clean and corrupted tests."""
     root, data_root, study_dir = Path(root), Path(data_root), Path(study_dir)
+    started = time.monotonic()
     settings = resolve_settings(settings, debug=debug, workers=workers)
     debug = settings.debug
-    manifests = {
-        name: load_manifest(data_root / "manifests" / f"{name}.json", root_override=data_root)
-        for name in ("cifar100", "tiny_imagenet", "dominoes")
-    }
+    manifests = {}
+    for name in ("cifar100", "tiny_imagenet", "dominoes"):
+        print(f"[prepare] Verifying {name} data", flush=True)
+        manifests[name] = load_manifest(
+            data_root / "manifests" / f"{name}.json", root_override=data_root
+        )
     if not debug:
+        print("[prepare] Verifying cifar100_c data", flush=True)
         manifests["cifar100_c"] = load_manifest(
             data_root / "manifests" / "cifar100_c.json", root_override=data_root
         )
-    check_plan(study_dir, make_plan(manifests, root, settings))
+    intended_plan = make_plan(manifests, root, settings)
+    check_plan(study_dir, intended_plan)
+    profiles = {}
     if not debug:
         for dataset in ("cifar100", "tiny_imagenet", "dominoes"):
             base = base_recipe(dataset, settings)
             path = root / "classification" / "verification" / f"{dataset}_cuda.json"
             value = profile_dataset(root, manifests[dataset], base, path)
             verify_profile(value, root, manifests[dataset], base)
-    with run_lock(study_dir):
+            profiles[dataset] = value
+    with run_lock(study_dir), StudyProgress(study_dir, intended_plan, manifests, profiles, started):
         plan = freeze_plan(study_dir, manifests, root, settings)
         specs = []
         cifar_base = base_recipe("cifar100", settings)
