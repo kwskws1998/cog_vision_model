@@ -1,0 +1,31 @@
+{
+  "datasets": ["cifar100"],
+  "methods": ["erm", "cue"],
+  "seeds": [0, 1],
+  "development_seed": 2027,
+  "tune": true,
+  "lr_candidates": [0.1, 0.4, 0.8],
+  "tau_candidates": [0.05, 0.15, 0.3],
+  "fixed_candidates": [0.1, 0.25, 0.5],
+  "training": {
+    "epochs": 200,
+    "batch_size": 1024,
+    "eval_batch_size": 2048,
+    "learning_rate": 0.8,
+    "warmup_epochs": 5,
+    "momentum": 0.9,
+    "weight_decay": 0.0001,
+    "milestones": [100, 150],
+    "lr_decay": 0.1,
+    "gate_tau": 0.15,
+    "gate_temperature": 0.05,
+    "joint_floor": 0.5,
+    "workers": 8,
+    "device": "cuda",
+    "precision": "bf16",
+    "eval_precision": "fp32",
+    "max_vram_gib": 28.0
+  },
+  "dataset_overrides": {},
+  "debug": false
+}

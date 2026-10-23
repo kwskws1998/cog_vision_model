@@ -77,7 +77,7 @@ def verified_metrics(root, manifest, spec, seal):
         or value["study_seal_sha256"] != canonical_hash(seal)
         or value["prediction_sha256"] != file_hash(run_dir / "test_predictions.pt")
         or (value["dataset"], value["method"], value["seed"])
-        != (config.dataset, "cue", config.seed)
+        != (config.dataset, config.method, config.seed)
     ):
         raise ValueError("Evaluation artifacts do not match the sealed CUE run")
     predictions = torch.load(run_dir / "test_predictions.pt", map_location="cpu", weights_only=True)

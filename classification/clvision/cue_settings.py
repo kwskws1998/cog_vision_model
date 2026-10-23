@@ -152,11 +152,11 @@ def add_cue_arguments(parser, root):
     parser.add_argument("--dry-run", action="store_true")
 
 
-def load_cue_arguments(arguments):
+def load_cue_arguments(arguments, settings_type=CueSettings):
     """Give explicit CLI values precedence over both common and dataset-specific JSON values."""
-    value = CueSettings.from_dict(json.loads(arguments.config.read_text())).to_dict()
-    for name in ("datasets", "seeds", "debug"):
-        if getattr(arguments, name) is not None:
+    value = settings_type.from_dict(json.loads(arguments.config.read_text())).to_dict()
+    for name in {item.name for item in fields(settings_type)} - {"training", "dataset_overrides"}:
+        if getattr(arguments, name, None) is not None:
             value[name] = getattr(arguments, name)
     for name in TRAINING_FIELDS:
         explicit = getattr(arguments, name, None)
@@ -164,4 +164,4 @@ def load_cue_arguments(arguments):
             value["training"][name] = explicit
             for override in value["dataset_overrides"].values():
                 override.pop(name, None)
-    return CueSettings.from_dict(value)
+    return settings_type.from_dict(value)

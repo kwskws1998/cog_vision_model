@@ -14,12 +14,14 @@ sys.path[:0] = [str(ROOT / "src"), str(ROOT / "classification")]
 
 def build_parser():
     """Share the exact same study inputs with the underlying experiment command."""
+    from clvision.ablation_settings import add_ablation_arguments
     from clvision.arguments import add_study_arguments
     from clvision.cue_settings import add_cue_arguments
 
     parser = argparse.ArgumentParser(description=__doc__)
     stages = parser.add_subparsers(dest="stage", required=True)
     add_cue_arguments(stages.add_parser("cue"), ROOT)
+    add_ablation_arguments(stages.add_parser("ablation"), ROOT)
     for name in ("check", "smoke"):
         stages.add_parser(name)
     prepare = stages.add_parser("prepare")
@@ -42,11 +44,13 @@ def main():
     arguments = parser.parse_args()
     if not (Path(sys.prefix) / "conda-meta/history").is_file():
         parser.error("Use conda run --prefix ./.conda python classification/run.py ...")
-    if arguments.stage == "cue":
+    if arguments.stage in ("cue", "ablation"):
+        from clvision.ablation_settings import load_ablation_arguments
         from clvision.cue_settings import load_cue_arguments
 
         try:
-            settings = load_cue_arguments(arguments)
+            loader = load_cue_arguments if arguments.stage == "cue" else load_ablation_arguments
+            settings = loader(arguments)
         except (OSError, TypeError, ValueError) as error:
             parser.error(str(error))
         if arguments.dry_run:
@@ -69,8 +73,8 @@ def main():
         if hasattr(arguments, "data_root")
         else []
     )
-    if arguments.stage == "cue":
-        commands = [["cue", *sys.argv[2:]]]
+    if arguments.stage in ("cue", "ablation"):
+        commands = [[arguments.stage, *sys.argv[2:]]]
     elif arguments.stage == "prepare":
         commands = [["check"], ["prepare", "--download", *common]]
         commands += [

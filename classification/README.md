@@ -4,9 +4,73 @@ This directory implements CIFAR-100, CIFAR-100-C, native-64px Tiny ImageNet-200,
 
 The main comparison is ERM, uniform non-target label smoothing, fixed global-to-local self-distillation, Zipf's Label Smoothing dense2, and CUE. These are training interventions on a common small-image ResNet-18. Final inference is global average pooling and the shared final classifier. CUE does not adapt or choose cues during testing.
 
+## Matched ResNet ablation and bounded tuning
+
+Use `classification/run.py ablation` to compare CUE with the same small-image ResNet-18 trained using only cross-entropy (`erm`). The editable inputs are in [`configs/ablation_5090.json`](configs/ablation_5090.json). The default starts with **CIFAR-100 only**: six development jobs plus four final jobs, totaling **10 runs / 2,000 epochs**. Adding Tiny ImageNet explicitly doubles this budget. Preflight and observed epoch timing estimate the complete declared workload automatically.
+
+The sequence is fixed before training:
+
+1. Train ERM at LR `0.1, 0.4, 0.8`, using development seed `2027` and the full 200-epoch schedule. Select by final-epoch internal-validation accuracy, then lower NLL, then candidate order.
+2. Freeze that LR for every arm. Train CUE with thresholds `0.05, 0.15, 0.30` on the same development seed, selecting by the same validation rule. Temperature `0.05` and joint floor `0.5` remain fixed. This is a bounded sequential search, not an exhaustive optimization of all CUE parameters.
+3. Freeze both selections and retrain ERM and CUE with seeds `0, 1`. Every paired arm uses the same initial weights, data split, augmentation recipe, batch, LR, warmup, epoch schedule, weight decay, and inference architecture. Only the loss intervention changes. The development seed must be separate from these final seeds.
+4. Finish and seal all declared training before opening final tests. The report verifies prediction identities and includes per-seed accuracy, mean, seed SD, and paired CUE-minus-ERM differences in percentage points. Two seeds provide pilot evidence; the code makes no formal significance claim.
+
+The ERM-first LR choice avoids weakening the baseline by choosing a CUE-specific common recipe. The tradeoff is that it does not find each method's independently optimal LR. A later larger search must be separately declared. Published reference scores remain descriptive comparisons: the backbone implementation, training split, batch, and Tiny ImageNet resolution differ.
+
+Update through GitHub after stopping or finishing any active job in this checkout. Preserve existing run folders; source-bound jobs cannot resume after a source change. Then activate the existing Conda environment and launch:
+
+```bash
+(
+set -e
+set -o pipefail
+
+cd /workspace/cog_vision_model
+git pull --ff-only origin main
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate "$PWD/.conda"
+python bootstrap.py --device cuda --verify-only
+mkdir -p results
+
+STAMP=$(date +%Y%m%d_%H%M%S)
+RUN_NAME="cifar100_erm_cue_tuned_b1024_seeds0_1_${STAMP}"
+
+python -u classification/run.py ablation \
+  --config classification/configs/ablation_5090.json \
+  --data-root data/classification \
+  --runs-dir "runs/${RUN_NAME}" \
+  --datasets cifar100 \
+  --methods erm cue \
+  --seeds 0 1 \
+  --development-seed 2027 \
+  --tune \
+  --lr-candidates 0.1 0.4 0.8 \
+  --tau-candidates 0.05 0.15 0.30 \
+  --epochs 200 \
+  --milestones 100 150 \
+  --batch-size 1024 \
+  --eval-batch-size 2048 \
+  --warmup-epochs 5 \
+  --momentum 0.9 \
+  --weight-decay 1e-4 \
+  --lr-decay 0.1 \
+  --gate-temperature 0.05 \
+  --joint-floor 0.5 \
+  --precision bf16 \
+  --eval-precision fp32 \
+  --device cuda \
+  --workers 8 \
+  --max-vram-gib 28 \
+  2>&1 | tee "results/${RUN_NAME}.log"
+)
+```
+
+Use `--dry-run` to inspect the budget without training. Use `--no-tune --learning-rate 0.8 --gate-tau 0.15` for a fixed-recipe four-run ablation, removing the scalar/grid ambiguity: scalar LR/tau flags are rejected while tuning is enabled. Five final seeds (`--seeds 0 1 2 3 4`) make 16 runs on one dataset with the default six tuning runs. Identical commands with the original `--runs-dir` resume/reuse the frozen study; changing scope or source requires a new directory.
+
+To test adaptive gating beyond the overall regularization effect, use `--methods erm fixed_global_local cue`. It adds three validation weight trials (`--fixed-candidates 0.1 0.25 0.5`) and two final runs, yielding 15 total CIFAR jobs. CUE must improve on this control to support an adaptive-weighting benefit. It is not enabled silently. The original four-job CUE-only workflow remains available below.
+
 ## CUE first on RTX 5090
 
-The recommended first run now trains only CUE. The two natural datasets with seeds 0 and 1 require **4 runs / 800 epochs**, instead of the full study's 50 runs / 8,200 epochs. There is no development grid, competitor training, dominoes task, or corruption evaluation in this mode. CUE coefficients are fixed before training.
+This fixed-recipe mode trains only CUE. The two natural datasets with seeds 0 and 1 require **4 runs / 800 epochs**, instead of the full study's 50 runs / 8,200 epochs. There is no development grid, competitor training, dominoes task, or corruption evaluation in this mode. CUE coefficients are fixed before training.
 
 The editable preset is [`configs/cue_5090.json`](configs/cue_5090.json). It uses training batch 1,024, evaluation batch 2,048, BF16 training, FP32 evaluation, eight loader workers, and a **28 GiB peak-reserved memory ceiling**. This ceiling does not allocate or guarantee that amount of VRAM. Real CUE training/validation preflight checks each selected dataset at the declared batch sizes, and saves throughput and memory under the run's `preflight/` directory. An OOM or numerical failure stops before benchmark training without changing the batch.
 
