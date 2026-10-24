@@ -1,5 +1,51 @@
 # Editable Python experiments
 
+For the single fixed-gate control, use
+[experiments/fixed_control.py](experiments/fixed_control.py). Its `RECIPE` is an
+editable Python dictionary; it runs only that method and seed. The supplied recipe
+is CIFAR-100, seed 0, PreAct ResNet-18, MSRA initialization, Zipf normalization,
+FP32, batch 128, LR 0.1, 200 epochs and `fixed_lambda=0.5`. This is global CE plus
+0.5 times the area-weighted local consistency KL. No ERM retraining, CUE search,
+or corruption suite is scheduled by this script.
+
+```bash
+python -u classification/experiments/fixed_control.py --runs-dir runs/fixed_lambda05_seed0
+```
+
+The generic `clvision.single_experiment.SingleRun` accepts any supported natural
+dataset and method in `Config`, with caller-provided inputs. Within its context,
+call `preflight()`, `train()`, then `evaluate()`. Training cannot start before
+preflight, and test evaluation cannot start until the full training schedule is
+complete. The script supports `--dry-run`, `--smoke`, `--data-root`, and explicit
+`--resume --runs-dir ORIGINAL_DIRECTORY`. CPU smoke results are labeled synthetic;
+they do not measure CUDA throughput. Use the existing prepared dataset for the
+production run.
+
+`BUDGET.finish_by=None` leaves the control unrestricted by a deadline. A future
+timezone-qualified deadline can be set explicitly. Real train/validation preflight
+provides the initial estimate; epoch logs report measured remaining time. This
+runner conservatively checks the full-run estimate on an interrupted resume.
+Completed runs reuse verified checkpoints and final predictions.
+
+`REFERENCE` contains the dataset and initial shared-weight hashes from both final
+contracts in the supplied
+`cifar100_preact_cue_tune_then_erm_fp32_b128_seed0_20261023_174727.zip` result archive.
+These checks bind this control to the prior split and initialization before long
+training. For a deliberately different dataset, seed or architecture, supply the
+appropriate hashes or set them to `None`; such a run is no longer that matched
+control. CPU smoke explicitly omits these production reference checks. Neither
+the new script nor `SingleRun` modifies or re-evaluates old results.
+
+`RUNS_DIR/results.md` and `results.json` report final validation and final test
+separately. `RUNS_DIR/experiment.py` saves the input script, `plan.json` freezes
+the full resolved configuration and source identity, and `main/seed0_fixed_global_local/`
+contains the history, final checkpoint, predictions and test-access audit. The
+experiment script must also remain unchanged on resume. In this fixed control,
+`fixed_lambda` controls the KL coefficient; `gate_tau`, `gate_temperature` and
+`joint_floor` do not affect its objective because the adaptive gate is replaced.
+
+## ERM / CUE tuning comparison
+
 The executable experiment is
 [experiments/erm_cue.py](experiments/erm_cue.py). Edit its input block to change
 the recipe or experiment order. The training engine, CUE implementation, and
