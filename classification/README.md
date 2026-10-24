@@ -4,21 +4,19 @@ This directory implements CIFAR-100, CIFAR-100-C, Tiny ImageNet-200 with explici
 
 The main comparison is ERM, uniform non-target label smoothing, fixed global-to-local self-distillation, Zipf's Label Smoothing dense2, and CUE. These are training interventions on a common small-image ResNet-18. Final inference is global average pooling and the shared final classifier. CUE does not adapt or choose cues during testing.
 
-## Editable Python experiments
+## Command-line experiments
 
-Use [experiments/erm_cue.py](experiments/erm_cue.py) for the current paired ERM/CUE
-experiment. Its `COMMON`, `DATASETS`, `SEEDS`, `TUNING`, `CUE_GRID`, `STAGES`, and
-`BUDGET` inputs declare the training recipe, tuning candidates, execution order,
-and optional time limit.
-Changing these inputs does not require editing the model, trainer, or orchestration
-implementation. Both methods receive the same common recipe; only CUE-specific
-parameters vary within its search.
+Use `python -u classification/run.py tune` with the
+[complete copy-paste command](EXPERIMENTS.md). Hyperparameters, seed lists, CUE
+search grids, trial limits, selection metric, optional ERM, stage order, and deadline
+are command-line inputs. No recipe-file edits are required. Add `--dry-run` to
+inspect the resolved plan before training.
 
-[EXPERIMENTS.md](EXPERIMENTS.md) documents the Python API, preview, synthetic smoke,
-server execution, and resume behavior. `tune` and `baseline` can be reordered in
-the script. The `evaluate` stage remains guarded until selection and both models'
-training are complete. CIFAR-100 uses 45,000 train / 5,000 validation / 10,000 final
-test examples, and hyperparameter selection uses validation only.
+The same reusable engine handles CUE-only searches and paired ERM/CUE comparisons.
+Use `--stages` to reorder tuning and ERM; preflight stays first and final evaluation
+stays last. CIFAR-100 uses 45,000 train / 5,000 validation / 10,000 final test
+examples, and hyperparameter selection uses validation only. The guide also
+documents existing-result references, synthetic smoke checks, and resume behavior.
 
 The superseded fixed overnight driver is preserved in
 [legacy/classification_overnight](../legacy/classification_overnight/README.md).

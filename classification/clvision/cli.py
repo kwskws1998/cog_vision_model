@@ -37,6 +37,7 @@ from .display import display_options, options_from_arguments
 from .engine import make_model, optimize_batch, optimizer_for
 from .identity import source_hash
 from .profile import profile_dataset
+from .tuning_cli import add_tuning_arguments, resolve_tuning_arguments, run_tuning_arguments
 from .workflow import base_recipe, run_study
 
 
@@ -250,6 +251,7 @@ def main(root):
     add_cue_arguments(commands.add_parser("cue"), root)
     add_erm_arguments(commands.add_parser("erm"), root)
     add_ablation_arguments(commands.add_parser("ablation"), root)
+    add_tuning_arguments(commands.add_parser("tune"), root)
     for name in ("check", "smoke"):
         command = commands.add_parser(name)
         if name == "smoke":
@@ -282,6 +284,13 @@ def main(root):
         display = options_from_arguments(arguments)
     except ValueError as error:
         parser.error(str(error))
+    if arguments.command == "tune":
+        try:
+            resolve_tuning_arguments(arguments, root)
+        except (OSError, TypeError, ValueError) as error:
+            parser.error(str(error))
+        run_tuning_arguments(arguments, root)
+        return
     if arguments.command in ("cue", "erm", "ablation"):
         try:
             settings = (

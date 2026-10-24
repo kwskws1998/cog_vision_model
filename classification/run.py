@@ -18,12 +18,14 @@ def build_parser():
     from clvision.arguments import add_study_arguments
     from clvision.config import ACTIVATIONS
     from clvision.cue_settings import add_cue_arguments, add_erm_arguments
+    from clvision.tuning_cli import add_tuning_arguments
 
     parser = argparse.ArgumentParser(description=__doc__)
     stages = parser.add_subparsers(dest="stage", required=True)
     add_cue_arguments(stages.add_parser("cue"), ROOT)
     add_erm_arguments(stages.add_parser("erm"), ROOT)
     add_ablation_arguments(stages.add_parser("ablation"), ROOT)
+    add_tuning_arguments(stages.add_parser("tune"), ROOT)
     for name in ("check", "smoke"):
         stage = stages.add_parser(name)
         if name == "smoke":
@@ -53,6 +55,16 @@ def main():
         parser.error(str(error))
     if not (Path(sys.prefix) / "conda-meta/history").is_file():
         parser.error("Use conda run --prefix ./.conda python classification/run.py ...")
+    if arguments.stage == "tune":
+        from clvision.tuning_cli import resolve_tuning_arguments
+
+        try:
+            _, _, preview = resolve_tuning_arguments(arguments, ROOT)
+        except (OSError, TypeError, ValueError) as error:
+            parser.error(str(error))
+        if arguments.dry_run:
+            print(json.dumps(preview, indent=2))
+            return
     if arguments.stage in ("cue", "erm", "ablation"):
         from clvision.ablation_settings import load_ablation_arguments
         from clvision.cue_settings import CueSettings, ErmSettings, load_cue_arguments
@@ -87,7 +99,7 @@ def main():
         if hasattr(arguments, "data_root")
         else []
     )
-    if arguments.stage in ("cue", "erm", "ablation"):
+    if arguments.stage in ("cue", "erm", "ablation", "tune"):
         commands = [[arguments.stage, *sys.argv[2:]]]
     elif arguments.stage == "prepare":
         commands = [["check"], ["prepare", "--download", *common]]
