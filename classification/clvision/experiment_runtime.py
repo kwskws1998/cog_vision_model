@@ -65,13 +65,16 @@ def admit_candidate(now, deadline, estimate, reserve_minutes, factor):
     return deadline is None or now + estimate * factor + reserve_minutes * 60 <= deadline
 
 
-def preflight_search(root, directory, manifest, config, candidates, steps=10):
-    """Exercise every exact CUE candidate before any long run, then measure the ERM reserve."""
+def preflight_search(
+    root, directory, manifest, config, candidates, steps=10, *, include_baseline=True
+):
+    """Exercise every exact CUE candidate and measure ERM only when the caller includes it."""
     if config.debug:
         return None, [None] * len(candidates)
     profiles = []
     jobs = [(f"cue{index}", candidate) for index, candidate in enumerate(candidates)]
-    jobs.append(("erm", config))
+    if include_baseline:
+        jobs.append(("erm", config))
     for name, recipe in jobs:
         path = directory / "preflight" / f"{name}.json"
         write(
@@ -95,5 +98,5 @@ def preflight_search(root, directory, manifest, config, candidates, steps=10):
     for key in ("initial_shared_model_sha256", "first_augmented_batch_sha256"):
         if len({row[key] for row in measurements}) != 1:
             raise ValueError("CUE candidate and ERM preflights are not matched")
-    write(f"[preflight-check] passed cue_candidates={len(candidates)} erm=1")
-    return profiles[-1], profiles[:-1]
+    write(f"[preflight-check] passed cue_candidates={len(candidates)} erm={int(include_baseline)}")
+    return (profiles[-1], profiles[:-1]) if include_baseline else (None, profiles)

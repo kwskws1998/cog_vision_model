@@ -1,0 +1,59 @@
+{
+  "config": {
+    "activation": "preact",
+    "batch_size": 128,
+    "dataset": "cifar100",
+    "debug": false,
+    "debug_max_batches": 0,
+    "device": "cuda",
+    "epochs": 200,
+    "eval_batch_size": 128,
+    "eval_precision": "fp32",
+    "fixed_lambda": 0.25,
+    "gate_tau": 0.3,
+    "gate_temperature": 0.05,
+    "gradient_clip": 0.0,
+    "initialization": "msra",
+    "joint_floor": 0.5,
+    "label_smoothing": 0.1,
+    "learning_rate": 0.1,
+    "lr_decay": 0.1,
+    "max_vram_gib": 28.0,
+    "method": "cue",
+    "milestones": [
+      100,
+      150
+    ],
+    "momentum": 0.9,
+    "normalization": "zipfls",
+    "precision": "fp32",
+    "seed": 0,
+    "tiny_imagenet_size": 64,
+    "warmup_epochs": 0,
+    "weight_decay": 0.0001,
+    "workers": 4,
+    "zipf_aux_weight": 0.1,
+    "zipf_lambda": 0.1,
+    "zipf_power": 1.0
+  },
+  "validation": {
+    "accuracy": 0.7494,
+    "balanced_accuracy": 0.7494,
+    "brier": 0.39797902339800867,
+    "ece": 0.1598743036431161,
+    "ece_bins": 15,
+    "n": 5000,
+    "nll": 1.4381797254884996
+  },
+  "dataset_id": "c2bf1ba3ae3dd4d810b6884b8a2f8964efc495398eadb1205edb82e343113d7f",
+  "initial_shared_model_sha256": "14390f2005fb56f90d10372941fda4a2a374867a56e579f28fdde1ca9ab2cb82",
+  "provenance": {
+    "archive": "cifar100_preact_cue_tune_then_erm_fp32_b128_seed0_20261023_174727.zip",
+    "member_directory": "cifar100_preact_cue_tune_then_erm_fp32_b128_seed0_20261023_174727/main/seed0_cue/",
+    "contract_sha256": "68b675b6ea44efeb62b0fe54547fc08863078f45ab088a21737285923690c0ed",
+    "summary_file_sha256": "d23ee57ccde73779e03f63745dfe581c324eb2e6b7a37a78072ba78cff202965",
+    "completion_file_sha256": "b9dc422b88de13b97e5e20f126e78fab4c66e011bc0c7c440b9cf68a8c3db5ff",
+    "historical_source_sha256": "3aa95d64d711c8ec9262384a4ae7c9cb82d2ff881599bc6bac34a8ef4eed9332",
+    "usage": "Read-only validation reference; no historical checkpoint resume or re-evaluation."
+  }
+}

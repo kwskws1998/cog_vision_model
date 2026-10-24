@@ -136,11 +136,15 @@ def select_candidate(rows, metric="accuracy"):
     )[1]
 
 
-def validate_stages(stages):
-    """Allow tuning and baseline in either order while keeping preflight first and final test last."""
+def validate_stages(stages, *, include_baseline=True):
+    """Keep preflight first and final evaluation last, with an optional matched baseline stage."""
     if not isinstance(stages, (tuple, list)):
         raise ValueError("Stages must be an ordered tuple or list")
     order = tuple(stages)
+    if not include_baseline:
+        if order != ("preflight", "tune", "evaluate"):
+            raise ValueError("CUE-only search requires preflight, tune, evaluate")
+        return order
     if (
         len(order) != 4
         or order[0] != "preflight"

@@ -1,5 +1,67 @@
 # Editable Python experiments
 
+## Additional CUE candidates without a baseline rerun
+
+[experiments/cue_temperature.py](experiments/cue_temperature.py) runs two additional
+CUE candidates on CIFAR-100, seed 0, with `gate_tau=0.30`, `joint_floor=0.5` and
+`gate_temperature` values 0.025 and 0.10. Edit `RECIPE`, `CANDIDATES`,
+`SELECTION_METRIC`, `BUDGET`, `PREFLIGHT_STEPS` and `DISPLAY` in the Python input
+block. The execution stages are `preflight`, `tune`, then `evaluate`.
+
+```bash
+python -u classification/experiments/cue_temperature.py --runs-dir runs/cue_temperature_seed0
+```
+
+The existing generic `Comparison` API supports this mode with
+`config=Config(method="cue", ...)`, `include_baseline=False`, and an optional
+`reference` dictionary. It preflights and trains only the declared CUE candidates;
+calling `baseline()` in this mode raises an error. Both candidates use their fixed
+final-epoch validation scores. Preflight estimates total train/validation time,
+and the epoch logs update remaining time from actual measurements. The supplied
+budget has no deadline; an explicit deadline may skip not-yet-started candidates,
+with every admission or skip recorded before selection closes.
+
+The checked-in [validation reference](references/cifar100_seed0_cue_temperature005.json)
+contains the prior CUE's complete configuration, validation score (0.7494), dataset
+identity, initial shared-weight hash and archive provenance. It was extracted from
+the supplied result archive after verifying contract, summary and history hashes.
+It contains no test score and loads no historical checkpoint. The former run's
+source identity is recorded rather than rewritten to match current code. The
+server needs neither the old ZIP nor the old run directory to use this reference.
+
+All common settings, seed, split identity, validation count and initial weights
+must match the reference. Candidate overrides may change only the three CUE gate
+fields. When deliberately changing common settings or datasets, provide a matching
+reference or set `REFERENCE_FILE=None` to select only among the new candidates.
+
+With the supplied reference and accuracy metric, a new candidate must **strictly
+exceed 74.94% validation accuracy** to replace it. A tie keeps the reference even
+if the new candidate has lower NLL. Among new candidates, validation accuracy,
+then NLL, then registered order break ties. With `metric="nll"`, strict lower NLL
+is the reference replacement criterion. No decision uses test scores.
+
+After all admissions are resolved and admitted candidates complete, the runner
+freezes `selection.json`. If the reference remains selected, it writes the report
+without reading test arrays or evaluating any model. If a new candidate wins, its
+final checkpoint is copied without retraining and is the only newly tested model.
+Unselected development candidates never access test data. ERM, the fixed-gate
+control and the old CUE are not retrained or re-evaluated.
+
+The output root contains `comparison.md`, `comparison.json`, `selection.json`,
+`search.json`, `plan.json` and a snapshot of the Python input script. Each
+`development/cueN/` folder contains its full history and final validation summary.
+Only a selected new winner has `main/seed0_cue/test_metrics.json`. The report always
+lists the validation scores and explicitly states whether a new test was run.
+
+`--dry-run` previews all inputs without training. `--smoke` runs both candidate
+recipes on a two-epoch synthetic CPU fixture, omits the real-data reference and
+exercises final evaluation of its selected candidate. It is not benchmark evidence.
+`--resume --runs-dir ORIGINAL_DIRECTORY` reuses completed work and test predictions;
+the recipe, reference, experiment script and executable source must be unchanged.
+The test suite also exercises retaining the reference without any test access.
+
+## One fixed-gate control
+
 For the single fixed-gate control, use
 [experiments/fixed_control.py](experiments/fixed_control.py). Its `RECIPE` is an
 editable Python dictionary; it runs only that method and seed. The supplied recipe
